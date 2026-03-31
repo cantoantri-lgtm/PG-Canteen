@@ -12,8 +12,9 @@ export interface Profile {
 }
 
 interface AuthContextType {
-  user: Profile | null; // Gộp chung user và profile thành 1 cho dễ quản lý
+  user: Profile | null;
   loading: boolean;
+  signIn: (userData: Profile) => void; // Thêm hàm signIn để chuyển trang ngay lập tức
   signOut: () => void;
 }
 
@@ -27,7 +28,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('AuthContext: Bắt đầu kiểm tra phiên đăng nhập bằng mã PIN');
     
     try {
-      // Tìm thông tin user đã lưu trong LocalStorage từ bước Đăng nhập
       const storedUser = localStorage.getItem('canteen_user');
       
       if (storedUser) {
@@ -41,31 +41,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.error('AuthContext: Lỗi khi đọc LocalStorage:', error);
       setUser(null);
     } finally {
-      // Dù thành công hay thất bại cũng phải tắt trạng thái loading để App chạy tiếp
       setLoading(false); 
     }
   }, []);
 
+  // Hàm đăng nhập: Lưu vào bộ nhớ và cập nhật giao diện ngay lập tức
+  const signIn = (userData: Profile) => {
+    localStorage.setItem('canteen_user', JSON.stringify(userData));
+    setUser(userData); 
+  };
+
   const signOut = () => {
     console.log('Đang đăng xuất...');
-    // Xóa sạch dấu vết trong bộ nhớ trình duyệt
     localStorage.removeItem('canteen_user');
     localStorage.clear();
     sessionStorage.clear();
     setUser(null);
     
-    // Đẩy thẳng về trang chủ/trang đăng nhập
     window.location.href = '/'; 
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
       {!loading && children}
     </AuthContext.Provider>
   );
 };
 
-// Hook tiện ích để gọi ở các trang khác
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
