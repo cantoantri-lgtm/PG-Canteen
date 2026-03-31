@@ -1,7 +1,7 @@
 import React from 'react';
 import { Outlet, Navigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
-import { LogOut, LayoutDashboard, Calendar, Package, Users, Store, Tag, Target, ShoppingCart, UserCircle } from 'lucide-react';
+import { LogOut, LayoutDashboard, Calendar, Package, Users, Store, Tag, Target, ShoppingCart, UserCircle, FileText } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export default function Layout() {
@@ -27,10 +27,12 @@ export default function Layout() {
     { name: 'Lịch bán hàng', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Chỉ tiêu' },
     { name: 'Chỉ tiêu doanh số', href: '/dashboard/admin/kpis', icon: Target, category: 'Chỉ tiêu' },
     { name: 'Nhập đơn hàng bán', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
+    { name: 'Báo cáo PG', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
   ];
 
   const pgNavigation = [
     { name: 'Bảng điều khiển & Đơn hàng', href: '/dashboard', icon: LayoutDashboard, category: 'Main' },
+    { name: 'Báo cáo cuối ngày', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
     { name: 'Hồ sơ cá nhân', href: '/dashboard/profile', icon: UserCircle, category: 'Cá nhân' },
   ];
 

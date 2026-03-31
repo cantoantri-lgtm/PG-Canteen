@@ -19,6 +19,7 @@ import KPIs from './pages/admin/KPIs';
 import Profiles from './pages/admin/Profiles';
 import Profile from './pages/Profile';
 import Orders from './pages/admin/Orders';
+import PGReport from './pages/PGReport';
 import { Toaster } from 'sonner';
 
 const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) => {
@@ -62,6 +63,7 @@ export default function App() {
           >
             <Route index element={<DashboardRouter />} />
             <Route path="profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="report" element={<ProtectedRoute><PGReport /></ProtectedRoute>} />
             <Route path="admin/canteens" element={<ProtectedRoute requireAdmin><Canteens /></ProtectedRoute>} />
             <Route path="admin/brands" element={<ProtectedRoute requireAdmin><Brands /></ProtectedRoute>} />
             <Route path="admin/products" element={<ProtectedRoute requireAdmin><Products /></ProtectedRoute>} />
