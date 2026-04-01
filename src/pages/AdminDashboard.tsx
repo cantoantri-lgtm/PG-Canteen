@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
+import { ArrowUp, ArrowDown } from 'lucide-react';
 
 interface DashboardData {
   totalRevenue: number;
@@ -42,6 +43,8 @@ export default function AdminDashboard() {
     canteenId: '',
     brandId: ''
   });
+
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'achievement', direction: 'desc' });
 
   const { data: masterData, isLoading: loadingMaster } = useQuery({
     queryKey: ['masterData'],
@@ -238,8 +241,7 @@ export default function AdminDashboard() {
 
     const pgRankings = Object.values(pgMap)
       .map(pg => ({ ...pg, achievement: (pg.sales / pg.kpi) * 100 }))
-      .filter(pg => pg.sales > 0 || pg.kpi > 1)
-      .sort((a, b) => b.achievement - a.achievement);
+      .filter(pg => pg.sales > 0 || pg.kpi > 1);
 
     return {
       totalRevenue, totalTarget, totalPGs, conversionRate, switchOrdersCount, totalOrdersCount,
@@ -249,6 +251,34 @@ export default function AdminDashboard() {
 
   const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6'];
   const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
+
+  const sortedPgRankings = useMemo(() => {
+    if (!data) return [];
+    let sortableItems = [...data.pgRankings];
+    sortableItems.sort((a: any, b: any) => {
+      if (a[sortConfig.key] < b[sortConfig.key]) {
+        return sortConfig.direction === 'asc' ? -1 : 1;
+      }
+      if (a[sortConfig.key] > b[sortConfig.key]) {
+        return sortConfig.direction === 'asc' ? 1 : -1;
+      }
+      return 0;
+    });
+    return sortableItems;
+  }, [data?.pgRankings, sortConfig]);
+
+  const requestSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'desc';
+    if (sortConfig.key === key && sortConfig.direction === 'desc') {
+      direction = 'asc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortIcon = (key: string) => {
+    if (sortConfig.key !== key) return null;
+    return sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4 inline-block ml-1" /> : <ArrowDown className="w-4 h-4 inline-block ml-1" />;
+  };
 
   const loading = loadingMaster || loadingOrders;
 
@@ -439,14 +469,22 @@ export default function AdminDashboard() {
                 <thead className="bg-white">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Hạng</th>
-                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Nhân sự</th>
-                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Doanh số đạt</th>
-                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">KPI (Giao/Tháng)</th>
-                    <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Tiến độ (%)</th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('name')}>
+                      Nhân sự {getSortIcon('name')}
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('sales')}>
+                      Doanh số đạt {getSortIcon('sales')}
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('kpi')}>
+                      KPI (Giao/Tháng) {getSortIcon('kpi')}
+                    </th>
+                    <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('achievement')}>
+                      Tiến độ (%) {getSortIcon('achievement')}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
-                  {data.pgRankings.map((pg, index) => (
+                  {sortedPgRankings.map((pg, index) => (
                     <tr key={pg.name} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
                         {index === 0 ? '🥇 1' : index === 1 ? '🥈 2' : index === 2 ? '🥉 3' : index + 1}

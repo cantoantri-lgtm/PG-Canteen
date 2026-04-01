@@ -50,7 +50,7 @@ export default function Layout() {
       {/* Sidebar for desktop, bottom nav for mobile */}
       <nav className="md:w-64 bg-white border-r border-gray-200 flex-shrink-0 flex md:flex-col justify-between md:justify-start fixed bottom-0 w-full md:relative z-10">
         <div className="p-4 hidden md:block border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-800">Marketing App</h1>
+          <h1 className="text-xl font-bold text-gray-800">PC Canteen Web APP</h1>
           <p className="text-sm text-gray-500 mt-1">{user?.full_name}</p>
           <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10 mt-2">
             {isAdmin ? 'Quản trị viên' : 'Nhân viên PG'}
@@ -111,7 +111,7 @@ export default function Layout() {
         {/* Mobile header */}
         <div className="md:hidden bg-white border-b border-gray-200 p-4 flex justify-between items-center sticky top-0 z-10">
           <div>
-            <h1 className="text-lg font-bold text-gray-800">Marketing App</h1>
+            <h1 className="text-lg font-bold text-gray-800">PC Canteen Web APP</h1>
             <p className="text-xs text-gray-500">{user?.full_name} ({isAdmin ? 'Quản trị viên' : 'Nhân viên PG'})</p>
           </div>
           <button onClick={signOut} className="text-gray-500 p-2">
