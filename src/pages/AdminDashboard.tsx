@@ -7,7 +7,9 @@ import {
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
-import { ArrowUp, ArrowDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, Sparkles } from 'lucide-react';
+import { PGDetailModal } from '../components/PGDetailModal';
+import { SmartReportModal } from '../components/SmartReportModal';
 
 interface DashboardData {
   totalRevenue: number;
@@ -36,15 +38,19 @@ export default function AdminDashboard() {
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [selectedCanteenInput, setSelectedCanteenInput] = useState('');
   const [selectedBrandInput, setSelectedBrandInput] = useState('');
+  const [selectedProductInput, setSelectedProductInput] = useState('');
 
   const [appliedFilters, setAppliedFilters] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
     canteenId: '',
-    brandId: ''
+    brandId: '',
+    productId: ''
   });
 
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'achievement', direction: 'desc' });
+  const [selectedPgForModal, setSelectedPgForModal] = useState<{ id: string, name: string, kpi: number } | null>(null);
+  const [showSmartReport, setShowSmartReport] = useState(false);
 
   const { data: masterData, isLoading: loadingMaster } = useQuery({
     queryKey: ['masterData'],
@@ -88,8 +94,8 @@ export default function AdminDashboard() {
       const { data, error } = await supabase
         .from('orders')
         .select('*, profiles(full_name)')
-        .gte('created_date', start.toISOString())
-        .lte('created_date', end.toISOString());
+        .gte('created_at', start.toISOString())
+        .lte('created_at', end.toISOString());
 
       if (error) {
         console.error('Lỗi tải đơn hàng:', error);
@@ -114,7 +120,8 @@ export default function AdminDashboard() {
       startDate: startDateInput,
       endDate: endDateInput,
       canteenId: selectedCanteenInput,
-      brandId: selectedBrandInput
+      brandId: selectedBrandInput,
+      productId: selectedProductInput
     });
   };
 
@@ -122,7 +129,7 @@ export default function AdminDashboard() {
     if (!masterData || !ordersData) return null;
 
     let filteredOrders = [...ordersData];
-    const { canteenId, brandId, startDate, endDate } = appliedFilters;
+    const { canteenId, brandId, productId, startDate, endDate } = appliedFilters;
 
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
@@ -132,6 +139,10 @@ export default function AdminDashboard() {
     if (brandId) {
       const productIds = masterData.products.filter(p => p.brand_id === brandId).map(p => p.product_id);
       filteredOrders = filteredOrders.filter(o => productIds.includes(o.product_id));
+    }
+
+    if (productId) {
+      filteredOrders = filteredOrders.filter(o => o.product_id === productId);
     }
 
     let activePgIds = masterData.profiles.map(p => p.id);
@@ -166,8 +177,8 @@ export default function AdminDashboard() {
 
     const ordersByDay: Record<string, any[]> = {};
     filteredOrders.forEach(o => {
-      if (!o.created_date) return;
-      const dayStr = format(new Date(o.created_date), 'yyyy-MM-dd');
+      if (!o.created_at) return;
+      const dayStr = format(new Date(o.created_at), 'yyyy-MM-dd');
       if (!ordersByDay[dayStr]) ordersByDay[dayStr] = [];
       ordersByDay[dayStr].push(o);
     });
@@ -224,12 +235,12 @@ export default function AdminDashboard() {
     const brandData = Object.entries(brandMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
     const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
-    const pgMap: Record<string, { name: string, sales: number, kpi: number }> = {};
+    const pgMap: Record<string, { id: string, name: string, sales: number, kpi: number }> = {};
     activePgIds.forEach(pgId => {
       const pgInfo = masterData.profiles.find(p => p.id === pgId);
       if (pgInfo) {
         const pgKpi = activeKpis.find(k => k.pg_id === pgId)?.sale_target || 1;
-        pgMap[pgId] = { name: pgInfo.full_name, sales: 0, kpi: Number(pgKpi) };
+        pgMap[pgId] = { id: pgId, name: pgInfo.full_name, sales: 0, kpi: Number(pgKpi) };
       }
     });
 
@@ -290,36 +301,55 @@ export default function AdminDashboard() {
     <div className="space-y-6 pb-12">
       <div className="sm:flex sm:items-center sm:justify-between mb-2">
         <h2 className="text-2xl font-bold text-gray-900">Báo cáo & Phân tích chuyên sâu</h2>
+        <button 
+          onClick={() => setShowSmartReport(true)}
+          className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:from-purple-700 hover:to-indigo-700 transition-all"
+        >
+          <Sparkles className="w-4 h-4 mr-2 text-yellow-300" />
+          Báo Cáo Thông Minh (AI)
+        </button>
       </div>
 
-      <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6 space-y-4 sm:space-y-0 sm:flex sm:items-end sm:space-x-4">
-        <div className="flex-1">
+      <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
+        <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Từ ngày</label>
           <input type="date" value={startDateInput} onChange={e => setStartDateInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-gray-50"/>
         </div>
-        <div className="flex-1">
+        <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Đến ngày</label>
           <input type="date" value={endDateInput} onChange={e => setEndDateInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-gray-50"/>
         </div>
-        <div className="flex-1">
+        <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Căn tin</label>
           <select value={selectedCanteenInput} onChange={e => setSelectedCanteenInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
             <option value="">-- Tất cả Căn tin --</option>
             {masterData?.canteens.map(c => <option key={c.canteen_id} value={c.canteen_id}>{c.canteen_name}</option>)}
           </select>
         </div>
-        <div className="flex-1">
+        <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Nhãn hàng</label>
-          <select value={selectedBrandInput} onChange={e => setSelectedBrandInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
+          <select value={selectedBrandInput} onChange={e => {
+            setSelectedBrandInput(e.target.value);
+            setSelectedProductInput('');
+          }} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
             <option value="">-- Tất cả Nhãn --</option>
             {masterData?.brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
           </select>
         </div>
-        <div>
+        <div className="w-full">
+          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Sản phẩm</label>
+          <select value={selectedProductInput} onChange={e => setSelectedProductInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
+            <option value="">-- Tất cả SP --</option>
+            {masterData?.products
+              .filter(p => !selectedBrandInput || p.brand_id === selectedBrandInput)
+              .map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
+          </select>
+        </div>
+        <div className="w-full">
           <button 
             onClick={handleApplyFilter} 
             disabled={loading}
-            className="w-full sm:w-auto inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-6 py-2 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+            className="w-full inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-6 py-2 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
           >
             {loading ? 'Đang lọc...' : 'Lọc Dữ Liệu'}
           </button>
@@ -434,7 +464,19 @@ export default function AdminDashboard() {
               <div className="h-64 w-full">
                 <ResponsiveContainer width="99%" height="100%">
                   <PieChart>
-                    <Pie data={data.brandData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} dataKey="value">
+                    <Pie 
+                      data={data.brandData} 
+                      cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} dataKey="value"
+                      className="cursor-pointer"
+                      onClick={(entry) => {
+                        const brand = masterData?.brands.find(b => b.brand_name === entry.name);
+                        if (brand) {
+                          setSelectedBrandInput(brand.brand_id);
+                          setSelectedProductInput('');
+                          setAppliedFilters(prev => ({ ...prev, brandId: brand.brand_id, productId: '' }));
+                        }
+                      }}
+                    >
                       {data.brandData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(value: number) => formatCurrency(value)} />
@@ -449,7 +491,20 @@ export default function AdminDashboard() {
               <div className="h-64 w-full">
                 <ResponsiveContainer width="99%" height="100%">
                   <PieChart>
-                    <Pie data={data.productData} cx="50%" cy="50%" outerRadius={90} dataKey="value" label={({name, percent}) => `${(percent * 100).toFixed(0)}%`}>
+                    <Pie 
+                      data={data.productData} 
+                      cx="50%" cy="50%" outerRadius={90} dataKey="value" 
+                      label={({name, percent}) => `${(percent * 100).toFixed(0)}%`}
+                      className="cursor-pointer"
+                      onClick={(entry) => {
+                        const product = masterData?.products.find(p => p.product_name === entry.name);
+                        if (product) {
+                          setSelectedProductInput(product.product_id);
+                          setSelectedBrandInput(product.brand_id);
+                          setAppliedFilters(prev => ({ ...prev, productId: product.product_id, brandId: product.brand_id }));
+                        }
+                      }}
+                    >
                       {data.productData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />)}
                     </Pie>
                     <Tooltip formatter={(value: number) => formatCurrency(value)} />
@@ -489,7 +544,12 @@ export default function AdminDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
                         {index === 0 ? '🥇 1' : index === 1 ? '🥈 2' : index === 2 ? '🥉 3' : index + 1}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-indigo-600">{pg.name}</td>
+                      <td 
+                        className="px-6 py-4 whitespace-nowrap text-sm font-medium text-indigo-600 cursor-pointer hover:text-indigo-800 hover:underline"
+                        onClick={() => setSelectedPgForModal({ id: pg.id, name: pg.name, kpi: pg.kpi })}
+                      >
+                        {pg.name}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-900">{formatCurrency(pg.sales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.kpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -513,6 +573,24 @@ export default function AdminDashboard() {
           </div>
         </>
       )}
+
+      {selectedPgForModal && (
+        <PGDetailModal
+          isOpen={!!selectedPgForModal}
+          onClose={() => setSelectedPgForModal(null)}
+          pgId={selectedPgForModal.id}
+          pgName={selectedPgForModal.name}
+          kpi={selectedPgForModal.kpi}
+          orders={ordersData}
+          masterData={masterData}
+        />
+      )}
+
+      <SmartReportModal 
+        isOpen={showSmartReport} 
+        onClose={() => setShowSmartReport(false)} 
+        masterData={masterData} 
+      />
     </div>
   );
 }
