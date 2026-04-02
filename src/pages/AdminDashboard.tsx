@@ -7,9 +7,10 @@ import {
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
-import { ArrowUp, ArrowDown, Sparkles } from 'lucide-react';
+import { ArrowUp, ArrowDown, Sparkles, Mail } from 'lucide-react';
 import { PGDetailModal } from '../components/PGDetailModal';
 import { SmartReportModal } from '../components/SmartReportModal';
+import { useSmartReport } from '../hooks/useSmartReport';
 
 interface DashboardData {
   totalRevenue: number;
@@ -82,6 +83,8 @@ export default function AdminDashboard() {
     },
     retry: false
   });
+
+  const { report: smartReportData } = useSmartReport(masterData, true);
 
   const { data: ordersData = [], isLoading: loadingOrders } = useQuery({
     queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate],
@@ -326,6 +329,59 @@ export default function AdminDashboard() {
     return sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4 inline-block ml-1" /> : <ArrowDown className="w-4 h-4 inline-block ml-1" />;
   };
 
+  const handleSendEmail = () => {
+    if (!data || !smartReportData) {
+      alert('Dữ liệu đang được tải, vui lòng thử lại sau.');
+      return;
+    }
+
+    const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
+
+    let emailBody = `BÁO CÁO ADMIN DASHBOARD - ${format(new Date(), 'dd/MM/yyyy')}\n\n`;
+
+    emailBody += `--- 1. TỔNG QUAN DASHBOARD ---\n`;
+    emailBody += `- Tổng doanh thu: ${formatCurrency(data.totalRevenue)}\n`;
+    emailBody += `- Tổng KPI: ${formatCurrency(data.totalTarget)}\n`;
+    emailBody += `- Tiến độ KPI: ${data.totalTarget > 0 ? ((data.totalRevenue / data.totalTarget) * 100).toFixed(1) : 0}%\n`;
+    emailBody += `- Tỉ lệ chuyển đổi: ${data.conversionRate.toFixed(1)}%\n`;
+    emailBody += `- Tổng số đơn hàng: ${data.totalOrdersCount}\n`;
+    emailBody += `- Tổng số PG hoạt động: ${data.totalPGs}\n\n`;
+
+    emailBody += `--- 2. BÁO CÁO PHÂN TÍCH NGÀY ---\n`;
+    emailBody += `- ${smartReportData.daily.summary.kpiText}\n`;
+    emailBody += `- ${smartReportData.daily.summary.periodText}\n`;
+    if (smartReportData.daily.summary.highlights.length > 0) {
+      emailBody += `- Điểm sáng:\n  + ${smartReportData.daily.summary.highlights.join('\n  + ')}\n`;
+    }
+    if (smartReportData.daily.recommendations.length > 0) {
+      emailBody += `- Đề xuất:\n`;
+      smartReportData.daily.recommendations.forEach((rec: any) => {
+        emailBody += `  + ${rec.title}: ${rec.problem}\n`;
+      });
+    }
+    emailBody += `\n`;
+
+    emailBody += `--- 3. BÁO CÁO PHÂN TÍCH THÁNG ---\n`;
+    emailBody += `- ${smartReportData.monthly.summary.kpiText}\n`;
+    emailBody += `- ${smartReportData.monthly.summary.periodText}\n`;
+    if (smartReportData.monthly.summary.highlights.length > 0) {
+      emailBody += `- Điểm sáng:\n  + ${smartReportData.monthly.summary.highlights.join('\n  + ')}\n`;
+    }
+    if (smartReportData.monthly.recommendations.length > 0) {
+      emailBody += `- Đề xuất:\n`;
+      smartReportData.monthly.recommendations.forEach((rec: any) => {
+        emailBody += `  + ${rec.title}: ${rec.problem}\n`;
+      });
+    }
+    emailBody += `\n`;
+
+    emailBody += `Vui lòng xem chi tiết trên hệ thống Admin Dashboard.`;
+
+    const subject = encodeURIComponent(`Báo Cáo Admin Dashboard - ${format(new Date(), 'dd/MM/yyyy')}`);
+    const body = encodeURIComponent(emailBody);
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+  };
+
   const loading = loadingMaster || loadingOrders;
 
   if (loadingMaster) {
@@ -336,13 +392,22 @@ export default function AdminDashboard() {
     <div className="space-y-6 pb-12">
       <div className="sm:flex sm:items-center sm:justify-between mb-2">
         <h2 className="text-2xl font-bold text-gray-900">Báo cáo & Phân tích chuyên sâu</h2>
-        <button 
-          onClick={() => setShowSmartReport(true)}
-          className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:from-purple-700 hover:to-indigo-700 transition-all"
-        >
-          <Sparkles className="w-4 h-4 mr-2 text-yellow-300" />
-          Báo Cáo Thông Minh (AI)
-        </button>
+        <div className="mt-3 sm:mt-0 flex space-x-3">
+          <button 
+            onClick={handleSendEmail}
+            className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-all"
+          >
+            <Mail className="w-4 h-4 mr-2 text-gray-500" />
+            Gửi Email Báo Cáo
+          </button>
+          <button 
+            onClick={() => setShowSmartReport(true)}
+            className="inline-flex items-center justify-center rounded-md border border-transparent bg-gradient-to-r from-purple-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:from-purple-700 hover:to-indigo-700 transition-all"
+          >
+            <Sparkles className="w-4 h-4 mr-2 text-yellow-300" />
+            Báo Cáo Thông Minh (AI)
+          </button>
+        </div>
       </div>
 
       <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
