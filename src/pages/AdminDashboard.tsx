@@ -171,7 +171,10 @@ export default function AdminDashboard() {
       daysArray = [new Date()];
     }
 
-    const dailyKPI = daysArray.length > 0 ? totalTarget / daysArray.length : 0;
+    const monthDays = eachDayOfInterval({ start: startOfMonth(start), end: endOfMonth(start) });
+    const workingDaysInMonth = monthDays.filter(d => !isSunday(d)).length || 1;
+
+    const dailyKPI = totalTarget / workingDaysInMonth;
     let cumulativeRevenue = 0;
     let cumulativeIdeal = 0;
 
@@ -190,7 +193,9 @@ export default function AdminDashboard() {
       const dailyOrders = ordersByDay[dayStr] || [];
       const dailyRevenue = dailyOrders.reduce((sum, o) => sum + Number(o.net_value || 0), 0);
       
-      cumulativeIdeal += dailyKPI;
+      if (!isSunday(day)) {
+        cumulativeIdeal += dailyKPI;
+      }
       const percentIdeal = totalTarget > 0 ? (cumulativeIdeal / totalTarget) * 100 : 0;
 
       let percentActual: number | null = null;
@@ -236,8 +241,6 @@ export default function AdminDashboard() {
     const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
     const pgMap: Record<string, { id: string, name: string, canteenName: string, sales: number, dailySales: number, kpi: number, dailyKpi: number }> = {};
-    const monthDays = eachDayOfInterval({ start: startOfMonth(start), end: endOfMonth(start) });
-    const workingDaysInMonth = monthDays.filter(d => !isSunday(d)).length || 1;
 
     activePgIds.forEach(pgId => {
       const pgInfo = masterData.profiles.find(p => p.id === pgId);
