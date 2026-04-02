@@ -38,8 +38,10 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
     const yesterdayStr = format(yesterday, 'yyyy-MM-dd');
 
     let revToday = 0, revYesterday = 0, revThisMonth = 0, revLastMonthUpToToday = 0;
-    const pgStats: Record<string, { name: string, today: number, yesterday: number, thisMonth: number, lastMonth: number }> = {};
-    const brandStats: Record<string, { name: string, today: number, yesterday: number, thisMonth: number, lastMonth: number }> = {};
+    const pgStats: Record<string, { id: string, name: string, today: number, yesterday: number, thisMonth: number, lastMonth: number }> = {};
+    const brandStats: Record<string, { id: string, name: string, today: number, yesterday: number, thisMonth: number, lastMonth: number }> = {};
+    const pgBrandStats: Record<string, Record<string, { thisMonth: number, lastMonth: number }>> = {};
+    const brandProductStats: Record<string, Record<string, { thisMonth: number, lastMonth: number }>> = {};
 
     orders.forEach(o => {
       if (!o.created_at) return;
@@ -60,7 +62,7 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
       // PG Stats
       if (!pgStats[o.pg_id]) {
         const pgName = masterData.profiles.find((p: any) => p.id === o.pg_id)?.full_name || 'Không xác định';
-        pgStats[o.pg_id] = { name: pgName, today: 0, yesterday: 0, thisMonth: 0, lastMonth: 0 };
+        pgStats[o.pg_id] = { id: o.pg_id, name: pgName, today: 0, yesterday: 0, thisMonth: 0, lastMonth: 0 };
       }
       if (isToday) pgStats[o.pg_id].today += val;
       if (isYesterday) pgStats[o.pg_id].yesterday += val;
@@ -70,15 +72,28 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
       // Brand Stats
       const product = masterData.products.find((p: any) => p.product_id === o.product_id);
       const brandId = product?.brand_id;
+      const productId = o.product_id;
       if (brandId) {
         if (!brandStats[brandId]) {
           const brandName = masterData.brands.find((b: any) => b.brand_id === brandId)?.brand_name || 'Khác';
-          brandStats[brandId] = { name: brandName, today: 0, yesterday: 0, thisMonth: 0, lastMonth: 0 };
+          brandStats[brandId] = { id: brandId, name: brandName, today: 0, yesterday: 0, thisMonth: 0, lastMonth: 0 };
         }
         if (isToday) brandStats[brandId].today += val;
         if (isYesterday) brandStats[brandId].yesterday += val;
         if (isThisMonth) brandStats[brandId].thisMonth += val;
         if (isLastMonthUpToToday) brandStats[brandId].lastMonth += val;
+
+        // PG -> Brand stats
+        if (!pgBrandStats[o.pg_id]) pgBrandStats[o.pg_id] = {};
+        if (!pgBrandStats[o.pg_id][brandId]) pgBrandStats[o.pg_id][brandId] = { thisMonth: 0, lastMonth: 0 };
+        if (isThisMonth) pgBrandStats[o.pg_id][brandId].thisMonth += val;
+        if (isLastMonthUpToToday) pgBrandStats[o.pg_id][brandId].lastMonth += val;
+
+        // Brand -> Product stats
+        if (!brandProductStats[brandId]) brandProductStats[brandId] = {};
+        if (!brandProductStats[brandId][productId]) brandProductStats[brandId][productId] = { thisMonth: 0, lastMonth: 0 };
+        if (isThisMonth) brandProductStats[brandId][productId].thisMonth += val;
+        if (isLastMonthUpToToday) brandProductStats[brandId][productId].lastMonth += val;
       }
     });
 
@@ -108,40 +123,120 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
     const growingBrands = [...brandList].filter(b => b.diff > 0).sort((a, b) => b.diff - a.diff);
     const decliningBrands = [...brandList].filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
 
-    const recommendations: string[] = [];
+    const detailedDecliningPGs = decliningPGs.map(pg => {
+      const brandStatsForPg = pgBrandStats[pg.id] || {};
+      let worstBrandId = '';
+      let worstBrandDiff = 0;
+      for (const [bId, stats] of Object.entries(brandStatsForPg)) {
+        const diff = stats.thisMonth - stats.lastMonth;
+        if (diff < worstBrandDiff) {
+          worstBrandDiff = diff;
+          worstBrandId = bId;
+        }
+      }
+      const worstBrandName = masterData.brands.find((b: any) => b.brand_id === worstBrandId)?.brand_name || 'Không xác định';
+      return {
+        ...pg,
+        worstBrandName,
+        worstBrandDiff
+      };
+    });
+
+    const detailedDecliningBrands = decliningBrands.map(brand => {
+      const productStatsForBrand = brandProductStats[brand.id] || {};
+      let worstProductId = '';
+      let worstProductDiff = 0;
+      for (const [pId, stats] of Object.entries(productStatsForBrand)) {
+        const diff = stats.thisMonth - stats.lastMonth;
+        if (diff < worstProductDiff) {
+          worstProductDiff = diff;
+          worstProductId = pId;
+        }
+      }
+      const worstProductName = masterData.products.find((p: any) => p.product_id === worstProductId)?.product_name || 'Không xác định';
+      return {
+        ...brand,
+        worstProductName,
+        worstProductDiff
+      };
+    });
+
+    const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
+
+    const detailedRecommendations: { title: string, problem: string, cause: string, solution: string }[] = [];
+
+    if (detailedDecliningPGs.length > 0) {
+      detailedDecliningPGs.forEach(pg => {
+        if (pg.worstBrandDiff < 0) {
+          detailedRecommendations.push({
+            title: `Vấn đề của PG: ${pg.name}`,
+            problem: `Sụt giảm doanh số tổng thể ${formatCurrency(Math.abs(pg.diff))} so với tháng trước.`,
+            cause: `Chủ yếu do sự sụt giảm mạnh ở nhóm hàng ${pg.worstBrandName} (giảm ${formatCurrency(Math.abs(pg.worstBrandDiff))}).`,
+            solution: `Quản lý cần làm việc trực tiếp với ${pg.name} để kiểm tra kỹ năng tư vấn nhóm hàng ${pg.worstBrandName}. Cần xem xét lại cách trưng bày, tồn kho của nhóm hàng này tại căn tin PG đang làm việc và bổ sung kiến thức sản phẩm nếu cần.`
+          });
+        }
+      });
+    }
+
+    if (detailedDecliningBrands.length > 0) {
+      detailedDecliningBrands.forEach(brand => {
+        if (brand.worstProductDiff < 0) {
+          detailedRecommendations.push({
+            title: `Vấn đề của Nhóm hàng: ${brand.name}`,
+            problem: `Sụt giảm doanh số toàn hệ thống ${formatCurrency(Math.abs(brand.diff))} so với tháng trước.`,
+            cause: `Doanh số bị kéo xuống chủ yếu bởi sản phẩm ${brand.worstProductName} (giảm ${formatCurrency(Math.abs(brand.worstProductDiff))}).`,
+            solution: `Kiểm tra lại tình trạng đứt hàng, giá bán hoặc chương trình khuyến mãi của đối thủ đối với sản phẩm ${brand.worstProductName}. Cân nhắc đẩy mạnh sampling hoặc combo khuyến mãi riêng cho sản phẩm này để lấy lại đà tăng trưởng.`
+          });
+        }
+      });
+    }
 
     if (revToday < revYesterday) {
-      recommendations.push(`Doanh số hôm nay đang thấp hơn hôm qua. Cần rà soát lại lượng khách tại các căn tin và đôn đốc PG tăng cường tiếp cận khách hàng vào các khung giờ cao điểm.`);
-    } else if (revToday > 0) {
-      recommendations.push(`Doanh số hôm nay tăng trưởng tốt so với hôm qua. Cần duy trì nhịp độ bán hàng và đảm bảo hàng hóa trưng bày đầy đủ.`);
+      const dropAmount = revYesterday - revToday;
+      const dropPercent = Math.abs(todayGrowth);
+      
+      let worstDailyPg: any = null;
+      let worstDailyDiff = 0;
+      
+      for (const pg of Object.values(pgStats)) {
+        const diff = pg.today - pg.yesterday;
+        if (diff < worstDailyDiff) {
+          worstDailyDiff = diff;
+          worstDailyPg = pg;
+        }
+      }
+
+      let worstPgText = '';
+      if (worstDailyPg) {
+        const pgDropPercent = worstDailyPg.yesterday > 0 
+          ? (Math.abs(worstDailyDiff) / worstDailyPg.yesterday) * 100 
+          : 100;
+        worstPgText = ` Nhân sự giảm mạnh nhất là ${worstDailyPg.name} (giảm ${formatCurrency(Math.abs(worstDailyDiff))}, tương đương ${pgDropPercent.toFixed(1)}%).`;
+      }
+
+      detailedRecommendations.push({
+        title: `Cảnh báo hệ thống: Doanh số ngày`,
+        problem: `Doanh số toàn hệ thống hôm nay giảm ${formatCurrency(dropAmount)} (${dropPercent.toFixed(1)}%) so với hôm qua.${worstPgText}`,
+        cause: `Lượng khách tiếp cận có thể thấp hơn hoặc tỉ lệ chuyển đổi giảm.`,
+        solution: `Nhắc nhở toàn bộ đội ngũ PG tăng cường hoạt động hoạt náo, chủ động tiếp cận khách hàng vào các khung giờ cao điểm. Đặc biệt cần hỗ trợ sát sao cho các PG đang có dấu hiệu đi lùi trong ngày.`
+      });
     }
 
-    if (revThisMonth < revLastMonthUpToToday) {
-      recommendations.push(`Tiến độ tháng này đang chậm hơn so với cùng kỳ tháng trước. Cần xem xét lại các chương trình khuyến mãi hoặc target đã giao cho PG.`);
-    }
-
-    if (decliningPGs.length > 0) {
-      recommendations.push(`Các PG ${decliningPGs.slice(0, 3).map(p => p.name).join(', ')} đang có dấu hiệu đi lùi về doanh số so với tháng trước. Quản lý cần trao đổi trực tiếp để tìm hiểu khó khăn (do vắng khách hay kỹ năng tư vấn) và hỗ trợ kịp thời.`);
-    }
-
-    if (decliningBrands.length > 0) {
-      recommendations.push(`Nhóm hàng ${decliningBrands.slice(0, 2).map(b => b.name).join(', ')} đang có sự sụt giảm. Đề xuất kiểm tra lại tồn kho, vị trí trưng bày tại các căn tin và xem xét chạy chương trình sampling/khuyến mãi để kích cầu.`);
-    }
-
-    if (growingPGs.length > 0) {
-      recommendations.push(`Tuyên dương và có chính sách khích lệ cho các PG ${growingPGs.slice(0, 3).map(p => p.name).join(', ')} vì đà tăng trưởng doanh số rất xuất sắc.`);
-    }
-
-    if (recommendations.length === 0) {
-      recommendations.push("Tình hình kinh doanh đang duy trì ở mức ổn định. Tiếp tục theo dõi các chỉ số trong những ngày tới.");
+    if (detailedRecommendations.length === 0) {
+      detailedRecommendations.push({
+        title: `Đánh giá chung`,
+        problem: `Không có vấn đề nghiêm trọng.`,
+        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt.`,
+        solution: `Tiếp tục duy trì các chiến lược hiện tại và khen thưởng các cá nhân xuất sắc.`
+      });
     }
 
     return {
       revToday, revYesterday, todayGrowth,
       revThisMonth, revLastMonthUpToToday, monthGrowth,
-      growingPGs, decliningPGs,
-      growingBrands, decliningBrands,
-      recommendations
+      growingPGs, decliningPGs: detailedDecliningPGs,
+      growingBrands, decliningBrands: detailedDecliningBrands,
+      detailedRecommendations
     };
   }, [orders, masterData]);
 
@@ -299,20 +394,34 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
               {/* Section 3: Đề xuất */}
               <div className="bg-indigo-50 rounded-lg border border-indigo-100 p-5">
                 <h3 className="text-lg font-bold text-indigo-900 mb-4 flex items-center">
-                  <Lightbulb className="w-5 h-5 mr-2 text-amber-500" /> Đề xuất phương án cải thiện
+                  <Lightbulb className="w-5 h-5 mr-2 text-amber-500" /> Phân tích nguyên nhân & Đề xuất giải pháp chi tiết
                 </h3>
-                <ul className="space-y-3">
-                  {report.recommendations.map((rec, idx) => (
-                    <li key={idx} className="flex items-start">
-                      <span className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded-full bg-indigo-200 text-indigo-700 font-bold text-xs mr-3 mt-0.5">
-                        {idx + 1}
-                      </span>
-                      <p className="text-sm text-indigo-900 leading-relaxed">
-                        {rec.split('**').map((part, i) => i % 2 === 1 ? <strong key={i}>{part}</strong> : part)}
-                      </p>
-                    </li>
+                <div className="space-y-4">
+                  {report.detailedRecommendations.map((rec, idx) => (
+                    <div key={idx} className="bg-white p-4 rounded-lg shadow-sm border border-indigo-100">
+                      <h4 className="font-bold text-indigo-800 mb-3 border-b border-gray-100 pb-2">{rec.title}</h4>
+                      <div className="flex items-start mb-2">
+                        <AlertCircle className="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-bold text-gray-900">Vấn đề: </span>
+                          <span className="text-gray-800">{rec.problem}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-start mb-2 pl-7">
+                        <div>
+                          <span className="font-bold text-amber-600">Nguyên nhân: </span>
+                          <span className="text-gray-700">{rec.cause}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-start pl-7">
+                        <div>
+                          <span className="font-bold text-green-600">Giải pháp cụ thể: </span>
+                          <span className="text-gray-700">{rec.solution}</span>
+                        </div>
+                      </div>
+                    </div>
                   ))}
-                </ul>
+                </div>
               </div>
 
             </>

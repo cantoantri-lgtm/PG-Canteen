@@ -235,18 +235,39 @@ export default function AdminDashboard() {
     const brandData = Object.entries(brandMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
     const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
-    const pgMap: Record<string, { id: string, name: string, sales: number, kpi: number }> = {};
+    const pgMap: Record<string, { id: string, name: string, canteenName: string, sales: number, dailySales: number, kpi: number }> = {};
     activePgIds.forEach(pgId => {
       const pgInfo = masterData.profiles.find(p => p.id === pgId);
       if (pgInfo) {
         const pgKpi = activeKpis.find(k => k.pg_id === pgId)?.sale_target || 1;
-        pgMap[pgId] = { id: pgId, name: pgInfo.full_name, sales: 0, kpi: Number(pgKpi) };
+        
+        const pgSchedules = masterData.schedules.filter(s => s.pg_id === pgId);
+        const canteenNames = pgSchedules.map(s => {
+          const canteen = masterData.canteens.find(c => c.canteen_id === s.canteen_id);
+          return canteen ? canteen.canteen_name : '';
+        }).filter(Boolean);
+        const uniqueCanteenNames = Array.from(new Set(canteenNames)).join(', ');
+
+        pgMap[pgId] = { 
+          id: pgId, 
+          name: pgInfo.full_name, 
+          canteenName: uniqueCanteenNames || 'Chưa phân công',
+          sales: 0, 
+          dailySales: 0,
+          kpi: Number(pgKpi) 
+        };
       }
     });
 
     filteredOrders.forEach(order => {
       if (pgMap[order.pg_id]) {
-        pgMap[order.pg_id].sales += Number(order.net_value);
+        const val = Number(order.net_value);
+        pgMap[order.pg_id].sales += val;
+        
+        const orderDate = order.created_at ? format(new Date(order.created_at), 'yyyy-MM-dd') : '';
+        if (orderDate === todayStr) {
+          pgMap[order.pg_id].dailySales += val;
+        }
       }
     });
 
@@ -527,8 +548,14 @@ export default function AdminDashboard() {
                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('name')}>
                       Nhân sự {getSortIcon('name')}
                     </th>
+                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('canteenName')}>
+                      Bệnh viện {getSortIcon('canteenName')}
+                    </th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('dailySales')}>
+                      Doanh số trong ngày {getSortIcon('dailySales')}
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('sales')}>
-                      Doanh số đạt {getSortIcon('sales')}
+                      Doanh số tháng {getSortIcon('sales')}
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('kpi')}>
                       KPI (Giao/Tháng) {getSortIcon('kpi')}
@@ -550,6 +577,8 @@ export default function AdminDashboard() {
                       >
                         {pg.name}
                       </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pg.canteenName}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-indigo-600">{formatCurrency(pg.dailySales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-900">{formatCurrency(pg.sales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.kpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -565,7 +594,7 @@ export default function AdminDashboard() {
                     </tr>
                   ))}
                   {data.pgRankings.length === 0 && (
-                    <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu hoạt động cho bộ lọc này.</td></tr>
+                    <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu hoạt động cho bộ lọc này.</td></tr>
                   )}
                 </tbody>
               </table>
