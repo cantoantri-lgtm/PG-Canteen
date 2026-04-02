@@ -329,7 +329,7 @@ export default function AdminDashboard() {
     return sortConfig.direction === 'asc' ? <ArrowUp className="w-4 h-4 inline-block ml-1" /> : <ArrowDown className="w-4 h-4 inline-block ml-1" />;
   };
 
-  const handleSendEmail = () => {
+  const handleSendEmail = async () => {
     if (!data || !smartReportData) {
       alert('Dữ liệu đang được tải, vui lòng thử lại sau.');
       return;
@@ -337,9 +337,9 @@ export default function AdminDashboard() {
 
     const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
 
-    let emailBody = `BÁO CÁO ADMIN DASHBOARD - ${format(new Date(), 'dd/MM/yyyy')}\n\n`;
+    let emailBody = `Đây là báo cáo tự động được gửi từ ứng dụng PC Canteen Web APP.\n\n`;
 
-    emailBody += `--- 1. TỔNG QUAN DASHBOARD ---\n`;
+    emailBody += `--- 1. TỔNG QUAN ---\n`;
     emailBody += `- Tổng doanh thu: ${formatCurrency(data.totalRevenue)}\n`;
     emailBody += `- Tổng KPI: ${formatCurrency(data.totalTarget)}\n`;
     emailBody += `- Tiến độ KPI: ${data.totalTarget > 0 ? ((data.totalRevenue / data.totalTarget) * 100).toFixed(1) : 0}%\n`;
@@ -347,28 +347,28 @@ export default function AdminDashboard() {
     emailBody += `- Tổng số đơn hàng: ${data.totalOrdersCount}\n`;
     emailBody += `- Tổng số PG hoạt động: ${data.totalPGs}\n\n`;
 
-    emailBody += `--- 2. BÁO CÁO PHÂN TÍCH NGÀY ---\n`;
+    emailBody += `--- 2. BÁO CÁO NGÀY ---\n`;
     emailBody += `- ${smartReportData.daily.summary.kpiText}\n`;
     emailBody += `- ${smartReportData.daily.summary.periodText}\n`;
     if (smartReportData.daily.summary.highlights.length > 0) {
       emailBody += `- Điểm sáng:\n  + ${smartReportData.daily.summary.highlights.join('\n  + ')}\n`;
     }
     if (smartReportData.daily.recommendations.length > 0) {
-      emailBody += `- Đề xuất:\n`;
+      emailBody += `- Đề xuất & Cảnh báo:\n`;
       smartReportData.daily.recommendations.forEach((rec: any) => {
         emailBody += `  + ${rec.title}: ${rec.problem}\n`;
       });
     }
     emailBody += `\n`;
 
-    emailBody += `--- 3. BÁO CÁO PHÂN TÍCH THÁNG ---\n`;
+    emailBody += `--- 3. BÁO CÁO THÁNG ---\n`;
     emailBody += `- ${smartReportData.monthly.summary.kpiText}\n`;
     emailBody += `- ${smartReportData.monthly.summary.periodText}\n`;
     if (smartReportData.monthly.summary.highlights.length > 0) {
       emailBody += `- Điểm sáng:\n  + ${smartReportData.monthly.summary.highlights.join('\n  + ')}\n`;
     }
     if (smartReportData.monthly.recommendations.length > 0) {
-      emailBody += `- Đề xuất:\n`;
+      emailBody += `- Đề xuất & Cảnh báo:\n`;
       smartReportData.monthly.recommendations.forEach((rec: any) => {
         emailBody += `  + ${rec.title}: ${rec.problem}\n`;
       });
@@ -377,9 +377,15 @@ export default function AdminDashboard() {
 
     emailBody += `Vui lòng xem chi tiết trên hệ thống Admin Dashboard.`;
 
-    const subject = encodeURIComponent(`Báo Cáo Admin Dashboard - ${format(new Date(), 'dd/MM/yyyy')}`);
+    const subject = encodeURIComponent(`Báo cáo bán hàng PG canteen - ${format(new Date(), 'dd/MM/yyyy')}`);
     const body = encodeURIComponent(emailBody);
-    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=cantoantri@gmail.com&su=${subject}&body=${body}`;
+    window.open(gmailUrl, '_blank');
+    
+    setTimeout(() => {
+      alert('Hệ thống đã mở tab Gmail chứa nội dung báo cáo tổng hợp. Vui lòng kiểm tra và gửi!');
+    }, 500);
   };
 
   const loading = loadingMaster || loadingOrders;
