@@ -181,7 +181,9 @@ export default function AdminDashboard() {
     const ordersByDay: Record<string, any[]> = {};
     filteredOrders.forEach(o => {
       if (!o.created_at) return;
-      const dayStr = format(new Date(o.created_at), 'yyyy-MM-dd');
+      const orderDate = new Date(o.created_at);
+      if (isNaN(orderDate.getTime())) return;
+      const dayStr = format(orderDate, 'yyyy-MM-dd');
       if (!ordersByDay[dayStr]) ordersByDay[dayStr] = [];
       ordersByDay[dayStr].push(o);
     });
