@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDaysInMonth } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, ComposedChart
@@ -235,11 +235,14 @@ export default function AdminDashboard() {
     const brandData = Object.entries(brandMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
     const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
-    const pgMap: Record<string, { id: string, name: string, canteenName: string, sales: number, dailySales: number, kpi: number }> = {};
+    const pgMap: Record<string, { id: string, name: string, canteenName: string, sales: number, dailySales: number, kpi: number, dailyKpi: number }> = {};
+    const daysInMonth = getDaysInMonth(start);
+
     activePgIds.forEach(pgId => {
       const pgInfo = masterData.profiles.find(p => p.id === pgId);
       if (pgInfo) {
         const pgKpi = activeKpis.find(k => k.pg_id === pgId)?.sale_target || 1;
+        const dailyKpi = Number(pgKpi) / daysInMonth;
         
         const pgSchedules = masterData.schedules.filter(s => s.pg_id === pgId);
         const canteenNames = pgSchedules.map(s => {
@@ -254,7 +257,8 @@ export default function AdminDashboard() {
           canteenName: uniqueCanteenNames || 'Chưa phân công',
           sales: 0, 
           dailySales: 0,
-          kpi: Number(pgKpi) 
+          kpi: Number(pgKpi),
+          dailyKpi
         };
       }
     });
@@ -272,7 +276,11 @@ export default function AdminDashboard() {
     });
 
     const pgRankings = Object.values(pgMap)
-      .map(pg => ({ ...pg, achievement: (pg.sales / pg.kpi) * 100 }))
+      .map(pg => ({ 
+        ...pg, 
+        achievement: (pg.sales / pg.kpi) * 100,
+        dailyAchievement: pg.dailyKpi > 0 ? (pg.dailySales / pg.dailyKpi) * 100 : 0
+      }))
       .filter(pg => pg.sales > 0 || pg.kpi > 1);
 
     return {
@@ -554,6 +562,12 @@ export default function AdminDashboard() {
                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('dailySales')}>
                       Doanh số trong ngày {getSortIcon('dailySales')}
                     </th>
+                    <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('dailyKpi')}>
+                      KPI Ngày {getSortIcon('dailyKpi')}
+                    </th>
+                    <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('dailyAchievement')}>
+                      Tiến độ ngày (%) {getSortIcon('dailyAchievement')}
+                    </th>
                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('sales')}>
                       Doanh số tháng {getSortIcon('sales')}
                     </th>
@@ -579,6 +593,17 @@ export default function AdminDashboard() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pg.canteenName}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-indigo-600">{formatCurrency(pg.dailySales)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.dailyKpi)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center justify-center">
+                          <span className={`text-sm font-bold ${pg.dailyAchievement >= 100 ? 'text-green-600' : pg.dailyAchievement >= 80 ? 'text-amber-500' : 'text-red-500'}`}>
+                            {pg.dailyAchievement.toFixed(1)}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
+                          <div className={`h-1.5 rounded-full ${pg.dailyAchievement >= 100 ? 'bg-green-500' : pg.dailyAchievement >= 80 ? 'bg-amber-400' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.dailyAchievement, 100)}%` }}></div>
+                        </div>
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-900">{formatCurrency(pg.sales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.kpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
@@ -594,7 +619,7 @@ export default function AdminDashboard() {
                     </tr>
                   ))}
                   {data.pgRankings.length === 0 && (
-                    <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu hoạt động cho bộ lọc này.</td></tr>
+                    <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu hoạt động cho bộ lọc này.</td></tr>
                   )}
                 </tbody>
               </table>
