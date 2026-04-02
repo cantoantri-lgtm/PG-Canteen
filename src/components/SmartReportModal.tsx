@@ -211,13 +211,23 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
         const shortfallRev = expectedRev - p.thisMonth;
         const shortfallPct = expectedMonthlyAchievement - p.monthlyAchievement;
         
-        const trend = p.improvedToday ? 'Tăng so với hôm qua' : 'Giảm/đi ngang so với hôm qua';
+        let trendStr = '';
+        if (p.diffToday > 0) {
+            const pct = p.yesterday > 0 ? (p.diffToday / p.yesterday) * 100 : 100;
+            trendStr = `Tăng ${formatCurrency(p.diffToday)} (${pct.toFixed(1)}%) so với hôm qua`;
+        } else if (p.diffToday < 0) {
+            const pct = p.yesterday > 0 ? (Math.abs(p.diffToday) / p.yesterday) * 100 : 100;
+            trendStr = `Giảm ${formatCurrency(Math.abs(p.diffToday))} (${pct.toFixed(1)}%) so với hôm qua`;
+        } else {
+            trendStr = `Đi ngang so với hôm qua`;
+        }
+
         const dailyShortfall = p.dailyKpi - p.today;
         
         if (shortfallRev > 0) {
-          return `- ${p.name}: Chậm tiến độ chuẩn ${formatCurrency(shortfallRev)} (${shortfallPct.toFixed(1)}%), chậm KPI ngày ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trend}`;
+          return `- ${p.name}: Chậm tiến độ chuẩn ${formatCurrency(shortfallRev)} (${shortfallPct.toFixed(1)}%), chậm KPI ngày ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trendStr}.`;
         } else {
-          return `- ${p.name}: Đạt tiến độ chuẩn nhưng chậm KPI ngày hôm nay ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trend}`;
+          return `- ${p.name}: Đạt tiến độ chuẩn nhưng chậm KPI ngày hôm nay ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trendStr}.`;
         }
       });
 
