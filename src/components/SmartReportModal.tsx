@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { X, Sparkles, TrendingUp, TrendingDown, AlertCircle, Lightbulb, Calendar, BarChart3 } from 'lucide-react';
-import { format, subDays, startOfMonth, subMonths } from 'date-fns';
+import { format, subDays, startOfMonth, subMonths, eachDayOfInterval, endOfMonth, isSunday } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
@@ -164,6 +164,70 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
     const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
 
     const detailedRecommendations: { title: string, problem: string, cause: string, solution: string }[] = [];
+
+    // KPI Analysis
+    const monthDays = eachDayOfInterval({ start: startOfMonth(today), end: endOfMonth(today) });
+    const workingDaysInMonth = monthDays.filter(d => !isSunday(d)).length || 1;
+    
+    const daysUpToToday = eachDayOfInterval({ start: startOfMonth(today), end: today });
+    const workingDaysUpToToday = daysUpToToday.filter(d => !isSunday(d)).length;
+
+    const expectedMonthlyAchievement = (workingDaysUpToToday / workingDaysInMonth) * 100;
+
+    const missedDailyPGs: any[] = [];
+
+    Object.values(pgStats).forEach(pg => {
+      const pgKpi = masterData.kpis.find((k: any) => k.pg_id === pg.id)?.sale_target || 1;
+      const dailyKpi = Number(pgKpi) / workingDaysInMonth;
+      const monthlyKpi = Number(pgKpi);
+
+      const dailyAchievement = dailyKpi > 0 ? (pg.today / dailyKpi) * 100 : 0;
+      const monthlyAchievement = monthlyKpi > 0 ? (pg.thisMonth / monthlyKpi) * 100 : 0;
+      
+      const isDailyMissed = dailyAchievement < 100 && pg.today > 0; // Only count if they worked today but missed
+      const isMonthlyMissed = monthlyAchievement < expectedMonthlyAchievement;
+      
+      const improvedToday = pg.today > pg.yesterday;
+      const diffToday = pg.today - pg.yesterday;
+
+      if (isDailyMissed || isMonthlyMissed) {
+        missedDailyPGs.push({
+          ...pg,
+          dailyKpi,
+          monthlyKpi,
+          dailyAchievement,
+          monthlyAchievement,
+          isDailyMissed,
+          isMonthlyMissed,
+          improvedToday,
+          diffToday
+        });
+      }
+    });
+
+    if (missedDailyPGs.length > 0) {
+      const details = missedDailyPGs.map(p => {
+        const expectedRev = workingDaysUpToToday * p.dailyKpi;
+        const shortfallRev = expectedRev - p.thisMonth;
+        const shortfallPct = expectedMonthlyAchievement - p.monthlyAchievement;
+        
+        const trend = p.improvedToday ? 'Tăng so với hôm qua' : 'Giảm/đi ngang so với hôm qua';
+        const dailyShortfall = p.dailyKpi - p.today;
+        
+        if (shortfallRev > 0) {
+          return `- ${p.name}: Chậm tiến độ chuẩn ${formatCurrency(shortfallRev)} (${shortfallPct.toFixed(1)}%), chậm KPI ngày ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trend}`;
+        } else {
+          return `- ${p.name}: Đạt tiến độ chuẩn nhưng chậm KPI ngày hôm nay ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trend}`;
+        }
+      });
+
+      detailedRecommendations.push({
+        title: `Cảnh báo KPI: Các PG chưa đạt tiến độ`,
+        problem: `Có ${missedDailyPGs.length} PG đang chậm tiến độ KPI.\n${details.join('\n')}`,
+        cause: `Nguyên nhân có thể do kỹ năng tiếp cận khách hàng chưa tốt, hoặc lượng khách tại điểm bán thấp.`,
+        solution: `Quản lý cần can thiệp ngay với các PG đang đi lùi/đi ngang. Phân tích nguyên nhân tại điểm bán và hỗ trợ trực tiếp.`
+      });
+    }
 
     if (detailedDecliningPGs.length > 0) {
       detailedDecliningPGs.forEach(pg => {
@@ -404,7 +468,7 @@ export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportMod
                         <AlertCircle className="w-5 h-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
                         <div>
                           <span className="font-bold text-gray-900">Vấn đề: </span>
-                          <span className="text-gray-800">{rec.problem}</span>
+                          <span className="text-gray-800 whitespace-pre-line">{rec.problem}</span>
                         </div>
                       </div>
                       <div className="flex items-start mb-2 pl-7">

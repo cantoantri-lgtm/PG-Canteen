@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDaysInMonth } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDaysInMonth, isSunday } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, ComposedChart
@@ -236,13 +236,14 @@ export default function AdminDashboard() {
     const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
     const pgMap: Record<string, { id: string, name: string, canteenName: string, sales: number, dailySales: number, kpi: number, dailyKpi: number }> = {};
-    const daysInMonth = getDaysInMonth(start);
+    const monthDays = eachDayOfInterval({ start: startOfMonth(start), end: endOfMonth(start) });
+    const workingDaysInMonth = monthDays.filter(d => !isSunday(d)).length || 1;
 
     activePgIds.forEach(pgId => {
       const pgInfo = masterData.profiles.find(p => p.id === pgId);
       if (pgInfo) {
         const pgKpi = activeKpis.find(k => k.pg_id === pgId)?.sale_target || 1;
-        const dailyKpi = Number(pgKpi) / daysInMonth;
+        const dailyKpi = Number(pgKpi) / workingDaysInMonth;
         
         const pgSchedules = masterData.schedules.filter(s => s.pg_id === pgId);
         const canteenNames = pgSchedules.map(s => {
