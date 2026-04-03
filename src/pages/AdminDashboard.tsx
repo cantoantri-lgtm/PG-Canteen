@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
-import { ArrowUp, ArrowDown, Sparkles, Mail } from 'lucide-react';
+import { ArrowUp, ArrowDown, Sparkles, Mail, CheckCircle2 } from 'lucide-react';
 import { PGDetailModal } from '../components/PGDetailModal';
 import { SmartReportModal } from '../components/SmartReportModal';
 import { useSmartReport } from '../hooks/useSmartReport';
@@ -292,9 +292,19 @@ export default function AdminDashboard() {
       }))
       .filter(pg => pg.sales > 0 || pg.kpi > 1);
 
+    const monthStart = startOfMonth(end);
+    let workingDaysPassed = 0;
+    try {
+      const daysUpToEnd = eachDayOfInterval({ start: monthStart, end: end });
+      workingDaysPassed = daysUpToEnd.filter(d => !isSunday(d)).length;
+    } catch (e) {
+      workingDaysPassed = 0;
+    }
+    const standardProgressPercent = Math.min(100, (workingDaysPassed / workingDaysInMonth) * 100);
+
     return {
       totalRevenue, totalTarget, totalPGs, conversionRate, switchOrdersCount, totalOrdersCount,
-      dailyData, brandData, productData, pgRankings
+      dailyData, brandData, productData, pgRankings, standardProgressPercent
     };
   }, [masterData, ordersData, appliedFilters]);
 
@@ -684,13 +694,16 @@ export default function AdminDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-900">{formatCurrency(pg.sales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.kpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center justify-center">
-                          <span className={`text-sm font-bold ${pg.achievement >= 100 ? 'text-green-600' : pg.achievement >= 80 ? 'text-amber-500' : 'text-red-500'}`}>
+                        <div className="flex items-center justify-center space-x-1">
+                          {pg.achievement >= data.standardProgressPercent && (
+                            <CheckCircle2 className="w-4 h-4 text-green-600" />
+                          )}
+                          <span className={`text-sm font-bold ${pg.achievement >= data.standardProgressPercent ? 'text-green-600' : 'text-red-500'}`}>
                             {pg.achievement.toFixed(1)}%
                           </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
-                          <div className={`h-1.5 rounded-full ${pg.achievement >= 100 ? 'bg-green-500' : pg.achievement >= 80 ? 'bg-amber-400' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.achievement, 100)}%` }}></div>
+                          <div className={`h-1.5 rounded-full ${pg.achievement >= data.standardProgressPercent ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.achievement, 100)}%` }}></div>
                         </div>
                       </td>
                     </tr>
