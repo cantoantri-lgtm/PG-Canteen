@@ -4,7 +4,11 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
 export function useSmartReport(masterData: any, isOpen: boolean = true, endDateStr?: string) {
-  const today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
+  let today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
+  const actualToday = new Date();
+  if (today > actualToday) {
+    today = actualToday;
+  }
   const yesterday = subDays(today, 1);
   const startOfThisMonth = startOfMonth(today);
   const startOfLastM = startOfMonth(subMonths(today, 1));
