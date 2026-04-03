@@ -3,8 +3,8 @@ import { format, subDays, startOfMonth, subMonths, eachDayOfInterval, endOfMonth
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
-export function useSmartReport(masterData: any, isOpen: boolean = true) {
-  const today = new Date();
+export function useSmartReport(masterData: any, isOpen: boolean = true, endDateStr?: string) {
+  const today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
   const yesterday = subDays(today, 1);
   const startOfThisMonth = startOfMonth(today);
   const startOfLastM = startOfMonth(subMonths(today, 1));

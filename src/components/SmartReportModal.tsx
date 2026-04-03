@@ -8,10 +8,11 @@ interface SmartReportModalProps {
   isOpen: boolean;
   onClose: () => void;
   masterData: any;
+  endDateStr?: string;
 }
 
-export function SmartReportModal({ isOpen, onClose, masterData }: SmartReportModalProps) {
-  const today = new Date();
+export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: SmartReportModalProps) {
+  const today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
   const yesterday = subDays(today, 1);
   const startOfThisMonth = startOfMonth(today);
   const startOfLastM = startOfMonth(subMonths(today, 1));

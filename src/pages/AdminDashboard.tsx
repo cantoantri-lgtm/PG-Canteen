@@ -84,7 +84,7 @@ export default function AdminDashboard() {
     retry: false
   });
 
-  const { report: smartReportData } = useSmartReport(masterData, true);
+  const { report: smartReportData } = useSmartReport(masterData, true, appliedFilters.endDate);
 
   const { data: ordersData = [], isLoading: loadingOrders } = useQuery({
     queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate],
@@ -721,6 +721,7 @@ export default function AdminDashboard() {
         isOpen={showSmartReport} 
         onClose={() => setShowSmartReport(false)} 
         masterData={masterData} 
+        endDateStr={appliedFilters.endDate}
       />
     </div>
   );
