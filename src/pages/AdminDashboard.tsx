@@ -583,6 +583,7 @@ export default function AdminDashboard() {
                     <Pie 
                       data={data.brandData} 
                       cx="50%" cy="50%" innerRadius={60} outerRadius={90} paddingAngle={2} dataKey="value"
+                      label={({percent}) => `${(percent * 100).toFixed(0)}%`}
                       className="cursor-pointer"
                       onClick={(entry) => {
                         const brand = masterData?.brands.find(b => b.brand_name === entry.name);
