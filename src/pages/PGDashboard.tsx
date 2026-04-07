@@ -175,12 +175,6 @@ export default function PGDashboard() {
       const base64Data = (reader.result as string).split(',')[1];
 
       const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        toast.error('Lỗi cấu hình: Không tìm thấy API Key của Google Gemini. Vui lòng thêm GEMINI_API_KEY trong phần Settings > Secrets.');
-        setIsScanning(false);
-        return;
-      }
-
       const ai = new GoogleGenAI({ apiKey });
       
       const response = await ai.models.generateContent({
