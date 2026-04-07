@@ -4,7 +4,8 @@ import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
-import { Camera } from 'lucide-react';
+import { Camera, Check, X } from 'lucide-react';
+import { matchProduct, learnAlias } from '../services/ocrLearningService';
 
 interface Product {
   product_id: string;
@@ -21,6 +22,14 @@ interface CartItem {
   net_value: number;
   item_type: 'Bán hàng' | 'Quà tặng' | 'Mẫu thử';
   switched_from_brand?: string | null;
+}
+
+interface PendingOcrItem {
+  original_name: string;
+  qty: number;
+  price: number;
+  suggestions: any[];
+  selected_product_id?: string;
 }
 
 const formatNumber = (numStr: string) => {
@@ -44,6 +53,10 @@ export default function PGDashboard() {
   
   const [cart, setCart] = useState<CartItem[]>([]);
   const [applicableGifts, setApplicableGifts] = useState<any[]>([]);
+  
+  // State cho OCR Learning
+  const [pendingOcrItems, setPendingOcrItems] = useState<PendingOcrItem[]>([]);
+  const [showOcrModal, setShowOcrModal] = useState(false);
 
   // Lấy chuỗi ngày YYYY-MM-DD theo giờ địa phương
   const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0];
@@ -240,33 +253,48 @@ export default function PGDashboard() {
         return;
       }
 
-      let addedCount = 0;
+      let autoAddedCount = 0;
       const newCartItems: CartItem[] = [];
+      const newPendingItems: PendingOcrItem[] = [];
 
-      items.forEach((item: any) => {
-        // Tìm sản phẩm gần giống nhất trong danh sách products được phép bán
-        const matchedProduct = products.find(p => 
-          item.product_name.toLowerCase().includes(p.product_name.toLowerCase()) ||
-          p.product_name.toLowerCase().includes(item.product_name.toLowerCase())
-        );
+      for (const item of items) {
+        // Sử dụng logic matchProduct (Self-learning OCR)
+        const matchResult = await matchProduct(item.product_name, products);
 
-        if (matchedProduct) {
-          newCartItems.push({
-            product_id: matchedProduct.product_id,
-            product_name: matchedProduct.product_name,
+        if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
+          const matchedProduct = products.find(p => p.product_id === matchResult.product_id);
+          if (matchedProduct) {
+            newCartItems.push({
+              product_id: matchedProduct.product_id,
+              product_name: matchedProduct.product_name,
+              qty: item.qty || 1,
+              net_value: item.price || matchedProduct.value * (item.qty || 1),
+              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
+              switched_from_brand: null
+            });
+            autoAddedCount++;
+          }
+        } else {
+          // Cần PG xác nhận thủ công
+          newPendingItems.push({
+            original_name: item.product_name,
             qty: item.qty || 1,
-            net_value: item.price || matchedProduct.value * (item.qty || 1),
-            item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
-            switched_from_brand: null
+            price: item.price || 0,
+            suggestions: matchResult.suggestions,
+            selected_product_id: matchResult.suggestions[0]?.product_id || ''
           });
-          addedCount++;
         }
-      });
+      }
 
-      if (addedCount > 0) {
+      if (autoAddedCount > 0) {
         setCart(prev => [...prev, ...newCartItems]);
-        toast.success(`Đã thêm ${addedCount} sản phẩm từ hóa đơn vào giỏ hàng!`);
-      } else {
+        toast.success(`Đã tự động thêm ${autoAddedCount} sản phẩm vào giỏ hàng!`);
+      }
+
+      if (newPendingItems.length > 0) {
+        setPendingOcrItems(newPendingItems);
+        setShowOcrModal(true);
+      } else if (autoAddedCount === 0) {
         toast.warning('Đã quét hóa đơn nhưng không có sản phẩm nào khớp với danh mục được phép bán.');
       }
 
@@ -282,6 +310,39 @@ export default function PGDashboard() {
       }, 1000);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  // --- XỬ LÝ XÁC NHẬN OCR ---
+  const handleConfirmPendingItems = async () => {
+    const resolvedCartItems: CartItem[] = [];
+    
+    for (const pending of pendingOcrItems) {
+      if (pending.selected_product_id) {
+         // 1. Ghi nhận học tập (Learn Alias)
+         await learnAlias(pending.original_name, pending.selected_product_id);
+         
+         // 2. Thêm vào giỏ hàng
+         const matchedProduct = products.find(p => p.product_id === pending.selected_product_id);
+         if (matchedProduct) {
+           resolvedCartItems.push({
+              product_id: matchedProduct.product_id,
+              product_name: matchedProduct.product_name,
+              qty: pending.qty,
+              net_value: pending.price || matchedProduct.value * pending.qty,
+              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
+              switched_from_brand: null
+           });
+         }
+      }
+    }
+    
+    if (resolvedCartItems.length > 0) {
+      setCart(prev => [...prev, ...resolvedCartItems]);
+      toast.success(`Đã thêm ${resolvedCartItems.length} sản phẩm được xác nhận vào giỏ hàng!`);
+    }
+    
+    setShowOcrModal(false);
+    setPendingOcrItems([]);
   };
 
   // --- THUẬT TOÁN TÍNH KHUYẾN MÃI TỰ ĐỘNG ---
@@ -537,6 +598,76 @@ export default function PGDashboard() {
           <button onClick={() => submitOrderMutation.mutate()} disabled={submitOrderMutation.isPending} className="w-full mt-6 bg-indigo-600 text-white py-3.5 rounded-xl font-bold uppercase tracking-wide shadow-lg shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 transition-all active:scale-95">
             {submitOrderMutation.isPending ? 'Đang xử lý...' : 'XÁC NHẬN LƯU GIỎ HÀNG'}
           </button>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN OCR (SELF-LEARNING) */}
+      {showOcrModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-gray-100 bg-indigo-50/50">
+              <h3 className="text-lg font-bold text-indigo-900">Xác nhận sản phẩm</h3>
+              <p className="text-sm text-indigo-600 mt-1">Hệ thống cần bạn xác nhận một số sản phẩm chưa rõ ràng trên hóa đơn.</p>
+            </div>
+            
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              {pendingOcrItems.map((item, idx) => (
+                <div key={idx} className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                  <div className="flex justify-between items-start mb-2">
+                    <div>
+                      <span className="text-xs font-semibold text-gray-500 uppercase">Tên trên bill:</span>
+                      <p className="font-medium text-gray-900">{item.original_name}</p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-semibold text-gray-500 uppercase">SL/Giá:</span>
+                      <p className="font-bold text-indigo-700">{item.qty} x {new Intl.NumberFormat('vi-VN').format(item.price)}đ</p>
+                    </div>
+                  </div>
+                  
+                  <label className="block mt-3 text-xs font-semibold text-gray-700 mb-1">Chọn sản phẩm đúng:</label>
+                  <select 
+                    className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500"
+                    value={item.selected_product_id}
+                    onChange={(e) => {
+                      const newItems = [...pendingOcrItems];
+                      newItems[idx].selected_product_id = e.target.value;
+                      setPendingOcrItems(newItems);
+                    }}
+                  >
+                    <option value="">-- Bỏ qua sản phẩm này --</option>
+                    <optgroup label="Gợi ý tốt nhất">
+                      {item.suggestions.map((s: any) => (
+                        <option key={`sugg-${s.product_id}`} value={s.product_id}>⭐ {s.product_name}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Tất cả sản phẩm">
+                      {products.map((p: any) => (
+                        <option key={`all-${p.product_id}`} value={p.product_id}>{p.product_name}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+              ))}
+            </div>
+            
+            <div className="p-4 border-t border-gray-100 flex gap-3 bg-white">
+              <button 
+                onClick={() => {
+                  setShowOcrModal(false);
+                  setPendingOcrItems([]);
+                }}
+                className="flex-1 py-2.5 rounded-xl font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Hủy bỏ
+              </button>
+              <button 
+                onClick={handleConfirmPendingItems}
+                className="flex-[2] py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
+              >
+                Xác nhận & Thêm vào giỏ
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
