@@ -174,7 +174,14 @@ export default function PGDashboard() {
       await new Promise((resolve) => (reader.onload = resolve));
       const base64Data = (reader.result as string).split(',')[1];
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        toast.error('Lỗi cấu hình: Không tìm thấy API Key của Google Gemini.');
+        setIsScanning(false);
+        return;
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
       
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-preview',
@@ -387,12 +394,12 @@ export default function PGDashboard() {
           {shops.map((s: any) => <option key={s.shop_id} value={s.shop_id}>{s.shops?.shop_name}</option>)}
         </select>
 
-        <div className="flex gap-2">
-          <select className="flex-1 p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductId('');}}>
+        <div className="space-y-4">
+          <select className="w-full p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductId('');}}>
             <option value="">-- Lọc Hãng --</option>
             {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
-          <select className="flex-1 p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
+          <select className="w-full p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
             <option value="" disabled>Chọn SP...</option>
             {filteredProducts.map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
           </select>
