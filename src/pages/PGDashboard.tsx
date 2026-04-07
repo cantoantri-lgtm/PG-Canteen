@@ -174,7 +174,7 @@ export default function PGDashboard() {
       await new Promise((resolve) => (reader.onload = resolve));
       const base64Data = (reader.result as string).split(',')[1];
 
-      const apiKey = process.env.GEMINI_API_KEY;
+      const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
       const ai = new GoogleGenAI({ apiKey });
       
       const response = await ai.models.generateContent({
