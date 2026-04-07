@@ -174,7 +174,7 @@ export default function PGDashboard() {
       await new Promise((resolve) => (reader.onload = resolve));
       const base64Data = (reader.result as string).split(',')[1];
 
-      const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
       if (!apiKey || apiKey === "") {
         toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
         setIsScanning(false);
