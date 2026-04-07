@@ -12,12 +12,7 @@ interface OrderItem {
   net_value: number;
   switched_from_brand: string | null;
   created_at: string;
-  products: {
-    product_name: string;
-    brands: {
-      brand_name: string;
-    };
-  };
+  products: any;
 }
 
 interface KPI {
@@ -29,7 +24,7 @@ interface KPI {
 
 export default function PGReport() {
   const { user } = useAuth();
-  const isAdmin = user?.admin_role === true || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedPgId, setSelectedPgId] = useState<string>(isAdmin ? '' : (user?.id || ''));

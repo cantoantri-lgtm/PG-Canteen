@@ -16,14 +16,20 @@ export default function Layout() {
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 
-  const isAdmin = user?.admin_role === true || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
 
   const adminNavigation = [
     { name: 'Bảng điều khiển', href: '/dashboard', icon: LayoutDashboard, category: 'Main' },
     { name: 'Người dùng', href: '/dashboard/admin/profiles', icon: Users, category: 'Dữ liệu' },
-    { name: 'Căn tin', href: '/dashboard/admin/canteens', icon: Store, category: 'Dữ liệu' },
+    { name: 'Vai trò (Roles)', href: '/dashboard/admin/roles', icon: Users, category: 'Dữ liệu' },
+    { name: 'Cửa hàng (Shops)', href: '/dashboard/admin/shops', icon: Store, category: 'Dữ liệu' },
+    { name: 'Accounts', href: '/dashboard/admin/accounts', icon: Store, category: 'Dữ liệu' },
+    { name: 'Channels', href: '/dashboard/admin/channels', icon: Store, category: 'Dữ liệu' },
     { name: 'Thương hiệu', href: '/dashboard/admin/brands', icon: Tag, category: 'Dữ liệu' },
     { name: 'Sản phẩm', href: '/dashboard/admin/products', icon: Package, category: 'Dữ liệu' },
+    { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Dữ liệu' },
+    { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Chỉ tiêu' },
+    { name: 'Khuyến mãi', href: '/dashboard/admin/promotions', icon: Target, category: 'Chỉ tiêu' },
     { name: 'Lịch bán hàng', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Chỉ tiêu' },
     { name: 'Chỉ tiêu doanh số', href: '/dashboard/admin/kpis', icon: Target, category: 'Chỉ tiêu' },
     { name: 'Nhập đơn hàng bán', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },

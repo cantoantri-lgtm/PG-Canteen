@@ -5,6 +5,7 @@ export interface Profile {
   id: string;
   full_name: string;
   admin_role: boolean;
+  role?: string;
   phone_number: string;
   dob?: string;
   email?: string;
@@ -28,7 +29,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('AuthContext: Bắt đầu kiểm tra phiên đăng nhập bằng mã PIN');
     
     try {
-      const storedUser = localStorage.getItem('canteen_user');
+      const storedUser = localStorage.getItem('shop_user');
       
       if (storedUser) {
         console.log('AuthContext: Đã tìm thấy tài khoản hợp lệ');
@@ -47,13 +48,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Hàm đăng nhập: Lưu vào bộ nhớ và cập nhật giao diện ngay lập tức
   const signIn = (userData: Profile) => {
-    localStorage.setItem('canteen_user', JSON.stringify(userData));
+    localStorage.setItem('shop_user', JSON.stringify(userData));
     setUser(userData); 
   };
 
   const signOut = () => {
     console.log('Đang đăng xuất...');
-    localStorage.removeItem('canteen_user');
+    localStorage.removeItem('shop_user');
     localStorage.clear();
     sessionStorage.clear();
     setUser(null);

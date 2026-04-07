@@ -23,7 +23,7 @@ interface Order {
 
 interface Profile { id: string; full_name: string; }
 interface Brand { brand_id: string; brand_name: string; }
-interface Product { product_id: string; product_name: string; brand_id: string; }
+interface Product { product_id: string; product_name: string; brand_id: string; value: number; }
 
 export default function Orders() {
   // --- STATES ---
@@ -32,6 +32,9 @@ export default function Orders() {
   const [isAdding, setIsAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [selectedBrandId, setSelectedBrandId] = useState<string>('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPgFilter, setSelectedPgFilter] = useState('');
+  const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
   
   // State mới cho đối thủ & Giỏ hàng Admin
   const [isConverted, setIsConverted] = useState(false);
@@ -99,6 +102,16 @@ export default function Orders() {
     idColumn: 'id' // Cập nhật theo schema mới
   }), []);
   useRealtimeSync(orderSyncConfig);
+
+  const filteredOrders = useMemo(() => {
+    return orders.filter(o => {
+      const matchesSearch = o.cart_id.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           (o.profiles?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesPg = selectedPgFilter === '' || o.pg_id === selectedPgFilter;
+      const matchesBrand = selectedBrandFilter === '' || o.products?.brand_id === selectedBrandFilter;
+      return matchesSearch && matchesPg && matchesBrand;
+    });
+  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter]);
 
   // --- 3. MUTATIONS (THÊM / SỬA / XÓA) ---
   const saveMutation = useMutation({
@@ -259,6 +272,42 @@ export default function Orders() {
         </div>
       </div>
 
+      {/* BỘ LỌC */}
+      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm đơn hàng</label>
+          <input
+            type="text"
+            placeholder="Nhập mã giỏ hàng hoặc tên PG..."
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo PG</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedPgFilter}
+            onChange={(e) => setSelectedPgFilter(e.target.value)}
+          >
+            <option value="">Tất cả PG</option>
+            {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+          </select>
+        </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Nhãn hàng</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedBrandFilter}
+            onChange={(e) => setSelectedBrandFilter(e.target.value)}
+          >
+            <option value="">Tất cả Nhãn hàng</option>
+            {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
+          </select>
+        </div>
+      </div>
+
       {/* BẢNG HIỂN THỊ */}
       <div className="mt-8 flex flex-col">
         <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
@@ -277,7 +326,7 @@ export default function Orders() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {orders.map((order) => (
+                  {filteredOrders.map((order) => (
                     <tr key={order.id} className="hover:bg-gray-50">
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
                         <div className="font-mono text-[10px] text-gray-400 uppercase">{order.cart_id}</div>
@@ -290,7 +339,17 @@ export default function Orders() {
                         {order.net_value.toLocaleString('vi-VN')} đ
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm">
-                        {order.switched_from_brand ? <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-1 rounded font-bold uppercase">{order.switched_from_brand}</span> : <span className="text-gray-400">-</span>}
+                        {order.switched_from_brand ? (
+                          <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${
+                            order.switched_from_brand.startsWith('QUÀ TẶNG') ? 'bg-pink-100 text-pink-800' : 
+                            order.switched_from_brand.startsWith('MẪU THỬ') ? 'bg-blue-100 text-blue-800' :
+                            'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {order.switched_from_brand}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                         <button onClick={() => handleEdit(order)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
@@ -298,7 +357,7 @@ export default function Orders() {
                       </td>
                     </tr>
                   ))}
-                  {orders.length === 0 && <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu.</td></tr>}
+                  {filteredOrders.length === 0 && <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">Không tìm thấy đơn hàng nào.</td></tr>}
                 </tbody>
               </table>
             </div>

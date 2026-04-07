@@ -13,6 +13,7 @@ interface Profile {
   dob: string;
   phone_number: string;
   admin_role: boolean;
+  role?: string;
   email: string;
   login_pin: string;
 }
@@ -22,6 +23,8 @@ export default function Profiles() {
   const [editForm, setEditForm] = useState<Partial<Profile>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedRoleFilter, setSelectedRoleFilter] = useState('');
 
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
     queryKey: ['profiles'],
@@ -32,12 +35,31 @@ export default function Profiles() {
     }
   });
 
+  const { data: roles = [] } = useQuery({
+    queryKey: ['roles'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('roles').select('*').order('role_name');
+      if (error) throw error;
+      return data as { role_id: string, role_name: string }[];
+    }
+  });
+
   const profileSyncConfig = useMemo(() => ({
     table: 'profiles',
     queryKey: ['profiles'],
     idColumn: 'id'
   }), []);
   useRealtimeSync(profileSyncConfig);
+
+  const filteredProfiles = useMemo(() => {
+    return profiles.filter(p => {
+      const matchesSearch = p.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           p.phone_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           (p.email || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesRole = selectedRoleFilter === '' || p.role === selectedRoleFilter;
+      return matchesSearch && matchesRole;
+    });
+  }, [profiles, searchQuery, selectedRoleFilter]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload: Partial<Profile>) => {
@@ -53,9 +75,13 @@ export default function Profiles() {
         });
         if (rpcError) throw rpcError;
 
-        // Update login_pin directly in profiles
-        if (payload.login_pin) {
-          await supabase.from('profiles').update({ login_pin: payload.login_pin }).eq('phone_number', payload.phone_number);
+        // Update login_pin and role directly in profiles
+        const updateData: any = {};
+        if (payload.login_pin) updateData.login_pin = payload.login_pin;
+        if (payload.role) updateData.role = payload.role;
+        
+        if (Object.keys(updateData).length > 0) {
+          await supabase.from('profiles').update(updateData).eq('phone_number', payload.phone_number);
         }
         return payload;
       } else {
@@ -122,6 +148,30 @@ export default function Profiles() {
         </button>
       </div>
 
+      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm người dùng</label>
+          <input
+            type="text"
+            placeholder="Nhập tên, SĐT hoặc email..."
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="w-full sm:w-64">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Vai trò</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedRoleFilter}
+            onChange={(e) => setSelectedRoleFilter(e.target.value)}
+          >
+            <option value="">Tất cả Vai trò</option>
+            {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+          </select>
+        </div>
+      </div>
+
       <div className="mt-8 flex flex-col">
         <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
           <div className="inline-block min-w-full py-2 align-middle md:px-6 lg:px-8">
@@ -138,17 +188,21 @@ export default function Profiles() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {profiles.map((profile) => (
+                  {filteredProfiles.map((profile) => (
                     <tr key={profile.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900">{profile.full_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.phone_number}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.email || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.dob || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
-                        {profile.admin_role ? (
+                        {profile.role ? (
+                          <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                            {roles.find(r => r.role_id === profile.role)?.role_name || profile.role}
+                          </span>
+                        ) : profile.admin_role ? (
                           <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10">Admin</span>
                         ) : (
-                          <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">PG</span>
+                          <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-600/20">Chưa có</span>
                         )}
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
@@ -157,6 +211,13 @@ export default function Profiles() {
                       </td>
                     </tr>
                   ))}
+                  {filteredProfiles.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        Không tìm thấy người dùng nào.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -189,6 +250,13 @@ export default function Profiles() {
               <label className="block text-sm font-medium text-gray-700">Mã PIN (6 số)</label>
               <input type="text" maxLength={6} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" value={editForm.login_pin || ''} onChange={e => setEditForm({...editForm, login_pin: e.target.value})} />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Vai trò</label>
+            <select className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" value={editForm.role || ''} onChange={e => setEditForm({...editForm, role: e.target.value})}>
+              <option value="">-- Chọn vai trò --</option>
+              {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+            </select>
           </div>
           <div className="flex items-center mt-4">
             <input id="admin_role" type="checkbox" className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={editForm.admin_role || false} onChange={e => setEditForm({...editForm, admin_role: e.target.checked})} />

@@ -26,7 +26,7 @@ interface DashboardData {
 }
 
 interface MasterData {
-  canteens: any[];
+  shops: any[];
   brands: any[];
   products: any[];
   profiles: any[];
@@ -37,14 +37,14 @@ interface MasterData {
 export default function AdminDashboard() {
   const [startDateInput, setStartDateInput] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [selectedCanteenInput, setSelectedCanteenInput] = useState('');
+  const [selectedShopInput, setSelectedShopInput] = useState('');
   const [selectedBrandInput, setSelectedBrandInput] = useState('');
   const [selectedProductInput, setSelectedProductInput] = useState('');
 
   const [appliedFilters, setAppliedFilters] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
-    canteenId: '',
+    shopId: '',
     brandId: '',
     productId: ''
   });
@@ -56,8 +56,8 @@ export default function AdminDashboard() {
   const { data: masterData, isLoading: loadingMaster } = useQuery({
     queryKey: ['masterData'],
     queryFn: async () => {
-      const [canteensRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes] = await Promise.all([
-        supabase.from('canteens').select('*').order('canteen_name'),
+      const [shopsRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes] = await Promise.all([
+        supabase.from('shops').select('*').order('shop_name'),
         supabase.from('brands').select('*').order('brand_name'),
         supabase.from('products').select('*'),
         supabase.from('profiles').select('*').eq('admin_role', false),
@@ -65,7 +65,7 @@ export default function AdminDashboard() {
         supabase.from('schedules').select('*')
       ]);
 
-      if (canteensRes.error) console.error('Lỗi tải canteens:', canteensRes.error);
+      if (shopsRes.error) console.error('Lỗi tải shops:', shopsRes.error);
       if (brandsRes.error) console.error('Lỗi tải brands:', brandsRes.error);
       if (productsRes.error) console.error('Lỗi tải products:', productsRes.error);
       if (profilesRes.error) console.error('Lỗi tải profiles:', profilesRes.error);
@@ -73,7 +73,7 @@ export default function AdminDashboard() {
       if (schedulesRes.error) console.error('Lỗi tải schedules:', schedulesRes.error);
 
       return {
-        canteens: canteensRes.data || [],
+        shops: shopsRes.data || [],
         brands: brandsRes.data || [],
         products: productsRes.data || [],
         profiles: profilesRes.data || [],
@@ -122,7 +122,7 @@ export default function AdminDashboard() {
     setAppliedFilters({
       startDate: startDateInput,
       endDate: endDateInput,
-      canteenId: selectedCanteenInput,
+      shopId: selectedShopInput,
       brandId: selectedBrandInput,
       productId: selectedProductInput
     });
@@ -132,7 +132,7 @@ export default function AdminDashboard() {
     if (!masterData || !ordersData) return null;
 
     let filteredOrders = [...ordersData];
-    const { canteenId, brandId, productId, startDate, endDate } = appliedFilters;
+    const { shopId, brandId, productId, startDate, endDate } = appliedFilters;
 
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
@@ -149,8 +149,8 @@ export default function AdminDashboard() {
     }
 
     let activePgIds = masterData.profiles.map(p => p.id);
-    if (canteenId) {
-      activePgIds = masterData.schedules.filter(s => s.canteen_id === canteenId).map(s => s.pg_id);
+    if (shopId) {
+      activePgIds = masterData.schedules.filter(s => s.shop_id === shopId).map(s => s.pg_id);
       filteredOrders = filteredOrders.filter(o => activePgIds.includes(o.pg_id));
     }
 
@@ -245,7 +245,7 @@ export default function AdminDashboard() {
     const brandData = Object.entries(brandMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
     const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
 
-    const pgMap: Record<string, { id: string, name: string, canteenName: string, sales: number, dailySales: number, kpi: number, dailyKpi: number }> = {};
+    const pgMap: Record<string, { id: string, name: string, shopName: string, sales: number, dailySales: number, kpi: number, dailyKpi: number }> = {};
 
     activePgIds.forEach(pgId => {
       const pgInfo = masterData.profiles.find(p => p.id === pgId);
@@ -254,16 +254,16 @@ export default function AdminDashboard() {
         const dailyKpi = Number(pgKpi) / workingDaysInMonth;
         
         const pgSchedules = masterData.schedules.filter(s => s.pg_id === pgId);
-        const canteenNames = pgSchedules.map(s => {
-          const canteen = masterData.canteens.find(c => c.canteen_id === s.canteen_id);
-          return canteen ? canteen.canteen_name : '';
+        const shopNames = pgSchedules.map(s => {
+          const shop = masterData.shops.find(c => c.shop_id === s.shop_id);
+          return shop ? shop.shop_name : '';
         }).filter(Boolean);
-        const uniqueCanteenNames = Array.from(new Set(canteenNames)).join(', ');
+        const uniqueShopNames = Array.from(new Set(shopNames)).join(', ');
 
         pgMap[pgId] = { 
           id: pgId, 
           name: pgInfo.full_name, 
-          canteenName: uniqueCanteenNames || 'Chưa phân công',
+          shopName: uniqueShopNames || 'Chưa phân công',
           sales: 0, 
           dailySales: 0,
           kpi: Number(pgKpi),
@@ -387,7 +387,7 @@ export default function AdminDashboard() {
 
     emailBody += `Vui lòng xem chi tiết trên hệ thống Admin Dashboard.`;
 
-    const subject = encodeURIComponent(`Báo cáo bán hàng PG canteen - ${format(new Date(), 'dd/MM/yyyy')}`);
+    const subject = encodeURIComponent(`Báo cáo bán hàng PG cửa hàng - ${format(new Date(), 'dd/MM/yyyy')}`);
     const body = encodeURIComponent(emailBody);
     
     const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=cantoantri@gmail.com&su=${subject}&body=${body}`;
@@ -436,10 +436,10 @@ export default function AdminDashboard() {
           <input type="date" value={endDateInput} onChange={e => setEndDateInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-gray-50"/>
         </div>
         <div className="w-full">
-          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Căn tin</label>
-          <select value={selectedCanteenInput} onChange={e => setSelectedCanteenInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả Căn tin --</option>
-            {masterData?.canteens.map(c => <option key={c.canteen_id} value={c.canteen_id}>{c.canteen_name}</option>)}
+          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Cửa hàng</label>
+          <select value={selectedShopInput} onChange={e => setSelectedShopInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
+            <option value="">-- Tất cả Cửa hàng --</option>
+            {masterData?.shops.map(s => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
           </select>
         </div>
         <div className="w-full">
@@ -644,8 +644,8 @@ export default function AdminDashboard() {
                     <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('name')}>
                       Nhân sự {getSortIcon('name')}
                     </th>
-                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('canteenName')}>
-                      Bệnh viện {getSortIcon('canteenName')}
+                    <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('shopName')}>
+                      Cửa hàng {getSortIcon('shopName')}
                     </th>
                     <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('dailySales')}>
                       Doanh số trong ngày {getSortIcon('dailySales')}
@@ -679,7 +679,7 @@ export default function AdminDashboard() {
                       >
                         {pg.name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pg.canteenName}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pg.shopName}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-indigo-600">{formatCurrency(pg.dailySales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.dailyKpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">

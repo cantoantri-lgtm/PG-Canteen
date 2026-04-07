@@ -1,44 +1,42 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
-import { useAuth } from '../lib/AuthContext'; // Nhúng context để kiểm tra đăng nhập
 import { useNavigate } from 'react-router-dom';
 
 export default function AuthPage() {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
-  const { user } = useAuth(); // Lấy thông tin user hiện tại
   const navigate = useNavigate();
 
-  // TỰ ĐỘNG CHUYỂN TRANG NẾU ĐÃ ĐĂNG NHẬP
+  // Kiểm tra đăng nhập bằng LocalStorage thay vì useAuth
   useEffect(() => {
-    if (user) {
+    const storedUser = localStorage.getItem('shop_user');
+    if (storedUser) {
       navigate('/dashboard', { replace: true });
     }
-  }, [user, navigate]);
+  }, [navigate]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // Gọi hàm đăng nhập bằng SĐT
+      // 1. Truy vấn trực tiếp vào bảng profiles để tìm số điện thoại
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('phone_number', phone.trim())
-        .single();
+        .single(); // single() sẽ báo lỗi nếu không tìm thấy hoặc tìm thấy > 1 dòng
 
       if (error || !data) {
         console.error('Lỗi tìm tài khoản:', error);
-        toast.error("Số điện thoại không tồn tại!");
+        toast.error("Số điện thoại không tồn tại trong hệ thống!");
         setLoading(false);
         return;
       }
 
-      // Kiểm tra mã PIN (so sánh chuỗi để tránh lỗi kiểu dữ liệu)
-      // Nếu trong database chưa có mã PIN (null), mặc định là 123456
+      // 2. Lấy mã PIN từ database để kiểm tra
       const storedPin = data.login_pin ? String(data.login_pin) : '123456';
       
       if (storedPin !== pin.trim()) {
@@ -47,20 +45,18 @@ export default function AuthPage() {
         return;
       }
 
-      // Lưu thông tin vào LocalStorage
-      const loggedInUser = data;
-      localStorage.setItem('canteen_user', JSON.stringify(loggedInUser));
+      // 4. Nếu mọi thứ đúng, lưu thông tin vào LocalStorage
+      localStorage.setItem('shop_user', JSON.stringify(data));
       
-      toast.success(`Chào mừng ${loggedInUser.full_name}!`);
+      toast.success(`Chào mừng ${data.full_name}!`);
       
-      // Chuyển hướng
-      // Force reload to ensure AuthContext picks up the new user from localStorage
+      // Chuyển hướng về trang dashboard
       window.location.href = '/dashboard';
 
     } catch (err) {
       console.error('Lỗi kết nối:', err);
       toast.error("Lỗi mạng! Vui lòng kiểm tra lại kết nối.");
-      setLoading(false); // Nhả nút bấm nếu rớt mạng
+      setLoading(false);
     }
   };
 
@@ -74,7 +70,7 @@ export default function AuthPage() {
             <input
               type="text"
               required
-              className="mt-1 block w-full border rounded-lg p-3 text-lg"
+              className="mt-1 block w-full border rounded-lg p-3 text-lg focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="Ví dụ: 0909987220"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
@@ -86,7 +82,7 @@ export default function AuthPage() {
               type="password"
               maxLength={6}
               required
-              className="mt-1 block w-full border rounded-lg p-3 text-center text-2xl tracking-widest"
+              className="mt-1 block w-full border rounded-lg p-3 text-center text-2xl tracking-widest focus:ring-indigo-500 focus:border-indigo-500"
               placeholder="••••••"
               value={pin}
               onChange={(e) => setPin(e.target.value)}

@@ -46,7 +46,7 @@ export default function Profile() {
       if (error) throw error;
       
       const updatedUser = { ...user, ...editForm };
-      localStorage.setItem('canteen_user', JSON.stringify(updatedUser));
+      localStorage.setItem('shop_user', JSON.stringify(updatedUser));
       
       toast.success('Cập nhật hồ sơ thành công!');
       setTimeout(() => window.location.reload(), 1000);

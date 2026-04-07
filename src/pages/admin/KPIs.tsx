@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { safeFormatDate } from '../../lib/utils';
@@ -28,6 +28,8 @@ export default function KPIs() {
   const [editForm, setEditForm] = useState<Partial<KPI>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedPgFilter, setSelectedPgFilter] = useState('');
 
   // 1. Fetch Data
   const { data: kpis = [], isLoading: loadingKpis } = useQuery({
@@ -62,6 +64,14 @@ export default function KPIs() {
     idColumn: 'kpi_id',
     selectQuery: '*, profiles(full_name)'
   });
+
+  const filteredKpis = useMemo(() => {
+    return kpis.filter(k => {
+      const matchesSearch = (k.profiles?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesPg = selectedPgFilter === '' || k.pg_id === selectedPgFilter;
+      return matchesSearch && matchesPg;
+    });
+  }, [kpis, searchQuery, selectedPgFilter]);
 
   // 2. Mutations
   const saveMutation = useMutation({
@@ -181,6 +191,30 @@ export default function KPIs() {
         </button>
       </div>
 
+      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm PG</label>
+          <input
+            type="text"
+            placeholder="Nhập tên nhân viên PG..."
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="w-full sm:w-64">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo PG</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedPgFilter}
+            onChange={(e) => setSelectedPgFilter(e.target.value)}
+          >
+            <option value="">Tất cả PG</option>
+            {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+          </select>
+        </div>
+      </div>
+
       <div className="mt-8 flex flex-col">
         <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
           <div className="inline-block min-w-full py-2 align-middle md:px-6 lg:px-8">
@@ -196,7 +230,7 @@ export default function KPIs() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {kpis.map((kpi) => (
+                  {filteredKpis.map((kpi) => (
                     <tr key={kpi.kpi_id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{kpi.profiles?.full_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{safeFormatDate(kpi.start_date, 'dd/MM/yyyy')}</td>
@@ -208,8 +242,8 @@ export default function KPIs() {
                       </td>
                     </tr>
                   ))}
-                  {kpis.length === 0 && (
-                    <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu.</td></tr>
+                  {filteredKpis.length === 0 && (
+                    <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Không tìm thấy chỉ tiêu nào.</td></tr>
                   )}
                 </tbody>
               </table>

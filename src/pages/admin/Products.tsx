@@ -12,6 +12,7 @@ interface Product {
   product_name: string;
   brand_id: string;
   value: number;
+  item_type: 'Sản phẩm bán' | 'Quà tặng' | 'Mẫu thử';
   brands: { brand_name: string };
 }
 
@@ -25,6 +26,8 @@ export default function Products() {
   const [editForm, setEditForm] = useState<Partial<Product>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
   
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -69,6 +72,14 @@ export default function Products() {
 
   useRealtimeSync(productSyncConfig);
   useRealtimeSync(brandSyncConfig);
+
+  const filteredProducts = useMemo(() => {
+    return products.filter(p => {
+      const matchesSearch = p.product_name.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesBrand = selectedBrandFilter === '' || p.brand_id === selectedBrandFilter;
+      return matchesSearch && matchesBrand;
+    });
+  }, [products, searchQuery, selectedBrandFilter]);
 
   // 3. Mutations (Chỉ Đẩy dữ liệu lên Supabase, UI sẽ tự cập nhật qua Realtime)
   const saveMutation = useMutation({
@@ -127,7 +138,7 @@ export default function Products() {
   // 4. Handlers
   const handleAdd = () => {
     setIsAdding(true);
-    setEditForm({ value: 0 }); 
+    setEditForm({ value: 0, item_type: 'Sản phẩm bán' }); 
     setIsModalOpen(true);
   };
 
@@ -147,6 +158,7 @@ export default function Products() {
       product_name: editForm.product_name.trim(),
       brand_id: editForm.brand_id,
       value: editForm.value || 0,
+      item_type: editForm.item_type || 'Sản phẩm bán',
     };
 
     saveMutation.mutate({ payload, isKeepOpen });
@@ -181,6 +193,30 @@ export default function Products() {
         </button>
       </div>
 
+      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex-1">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm sản phẩm</label>
+          <input
+            type="text"
+            placeholder="Nhập tên sản phẩm..."
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="w-full sm:w-64">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo thương hiệu</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedBrandFilter}
+            onChange={(e) => setSelectedBrandFilter(e.target.value)}
+          >
+            <option value="">Tất cả thương hiệu</option>
+            {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
+          </select>
+        </div>
+      </div>
+
       <div className="mt-8 flex flex-col">
         <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
           <div className="inline-block min-w-full py-2 align-middle md:px-6 lg:px-8">
@@ -190,15 +226,25 @@ export default function Products() {
                   <tr>
                     <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Tên Sản phẩm</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Thương hiệu</th>
+                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Loại</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Giá trị quy chuẩn</th>
                     <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {products.map((product) => (
+                  {filteredProducts.map((product) => (
                     <tr key={product.product_id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{product.product_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.brands?.brand_name}</td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          product.item_type === 'Quà tặng' ? 'bg-pink-100 text-pink-800' :
+                          product.item_type === 'Mẫu thử' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {product.item_type || 'Sản phẩm bán'}
+                        </span>
+                      </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm font-semibold text-gray-900">
                         {new Intl.NumberFormat('vi-VN').format(product.value)} VNĐ
                       </td>
@@ -236,6 +282,18 @@ export default function Products() {
             >
               <option value="">-- Chọn Thương hiệu --</option>
               {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Loại sản phẩm</label>
+            <select 
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" 
+              value={editForm.item_type || 'Sản phẩm bán'} 
+              onChange={e => setEditForm({...editForm, item_type: e.target.value as any})}
+            >
+              <option value="Sản phẩm bán">Sản phẩm bán</option>
+              <option value="Quà tặng">Quà tặng</option>
+              <option value="Mẫu thử">Mẫu thử</option>
             </select>
           </div>
           <div>
