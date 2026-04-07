@@ -175,6 +175,11 @@ export default function PGDashboard() {
       const base64Data = (reader.result as string).split(',')[1];
 
       const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey || apiKey === "") {
+        toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
+        setIsScanning(false);
+        return;
+      }
       const ai = new GoogleGenAI({ apiKey });
       
       const response = await ai.models.generateContent({
