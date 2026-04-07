@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Edit2, Trash2, ChevronDown, ChevronUp, Search, Filter, RefreshCw, Gift } from 'lucide-react';
+import { Plus, Edit2, Trash2, ChevronDown, ChevronUp, Search, Filter, RefreshCw, Gift, Layers } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 
@@ -31,6 +31,7 @@ interface PromotionTier {
   gift_quantity?: number;
   min_total_qty: number;
   override_end_date?: string;
+  is_ontop?: boolean; // BỔ SUNG TRƯỜNG ON-TOP
   conditions: PromotionCondition[];
   products?: { product_name: string };
   gifts?: PromotionTierGift[];
@@ -53,6 +54,7 @@ interface Promotion {
 }
 
 export default function Promotions() {
+  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Promotion>>({});
   const [isAdding, setIsAdding] = useState(false);
@@ -125,7 +127,6 @@ export default function Promotions() {
       const { data, error } = await supabase.from('promotions').select('*, programs(program_name, start_date, end_date), channels(channel_name), accounts(account_name), shops(shop_name)').order('promotion_name');
       if (error) throw error;
       
-      // Fetch tiers and conditions for each promotion
       const promotionsWithDetails = await Promise.all((data as Promotion[]).map(async (p) => {
         const { data: tiersData } = await supabase.from('promotion_tiers').select('*, products:gift_product_id(product_name)').eq('promotion_id', p.promotion_id);
         const rawTiers = await Promise.all((tiersData || []).map(async (t) => {
@@ -137,7 +138,8 @@ export default function Promotions() {
         const tierMap = new Map<string, PromotionTier>();
         
         for (const t of rawTiers) {
-          const key = `${t.tier_name}|${t.tier_type}|${t.support_amount}|${t.min_total_qty}|${t.override_end_date}`;
+          // Bổ sung is_ontop vào khóa map để tránh gộp nhầm các tier khác thuộc tính này
+          const key = `${t.tier_name}|${t.tier_type}|${t.support_amount}|${t.min_total_qty}|${t.override_end_date}|${t.is_ontop}`;
           if (tierMap.has(key)) {
             const existing = tierMap.get(key)!;
             if (t.gift_product_id) {
@@ -206,7 +208,6 @@ export default function Promotions() {
         const { error } = await supabase.from('promotions').update(payload).eq('promotion_id', promotionId);
         if (error) throw error;
         
-        // Delete existing tiers and conditions
         const { data: existingTiers } = await supabase.from('promotion_tiers').select('id').eq('promotion_id', promotionId);
         if (existingTiers && existingTiers.length > 0) {
           const tierIds = existingTiers.map(t => t.id);
@@ -215,7 +216,6 @@ export default function Promotions() {
         }
       }
 
-      // Insert new tiers and conditions
       for (const tier of tiers) {
         const { conditions, id, products, gifts, ...tierData } = tier;
         
@@ -226,6 +226,7 @@ export default function Promotions() {
             ...tierData,
             gift_product_id: gift.gift_product_id || null,
             gift_quantity: gift.gift_quantity || 1,
+            is_ontop: tierData.is_ontop || false, // Đẩy is_ontop xuống DB
             promotion_id: promotionId
           }]).select();
           
@@ -234,7 +235,6 @@ export default function Promotions() {
           if (conditions && conditions.length > 0) {
             const conditionsToInsert = conditions.map(c => {
               const { id, ...cData } = c;
-              // Convert target_values string to array for Postgres text[] column
               let targetValuesArray: string[] = [];
               if (Array.isArray(cData.target_values)) {
                 targetValuesArray = cData.target_values;
@@ -258,6 +258,7 @@ export default function Promotions() {
     },
     onSuccess: (_, variables) => {
       toast.success(isAdding ? 'Thêm promotion thành công!' : 'Cập nhật promotion thành công!');
+      queryClient.invalidateQueries({ queryKey: ['promotions'] });
       if (variables.isKeepOpen && isAdding) {
         setEditForm({ promotion_name: '', promotion_type: '', program_id: '', channel_id: '', account_id: '', shop_id: '', mechanic_rules: {}, tiers: [] });
       } else {
@@ -277,6 +278,7 @@ export default function Promotions() {
     },
     onSuccess: () => {
       toast.success('Đã xóa promotion!');
+      queryClient.invalidateQueries({ queryKey: ['promotions'] });
     },
     onError: (error: any) => {
       toast.error(`Lỗi khi xóa: ${error.message}`);
@@ -292,6 +294,7 @@ export default function Promotions() {
         tier_type: 'Chiết khấu số lượng', 
         support_amount: 0, 
         min_total_qty: 0, 
+        is_ontop: false, // Giá trị mặc định cho On-top
         conditions: [{ condition_type: 'Dòng sản phẩm', target_values: '', min_target_value: 1 }] 
       }] 
     });
@@ -353,7 +356,7 @@ export default function Promotions() {
         </div>
         <div className="flex items-center space-x-4">
           <button 
-            onClick={() => {}} 
+            onClick={() => queryClient.invalidateQueries({ queryKey: ['promotions'] })} 
             className="text-sm text-blue-600 hover:text-blue-800 flex items-center"
           >
             Làm mới dữ liệu
@@ -473,9 +476,17 @@ export default function Promotions() {
                     {promotion.tiers?.map((tier, idx) => (
                       <div key={idx} className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm relative overflow-hidden">
                         <div className="flex justify-between items-start mb-4">
-                          <div className="flex items-start">
-                            {tier.tier_type === 'Quà tặng' && <Gift className="h-5 w-5 text-pink-500 mr-2 mt-0.5" />}
-                            <h5 className="font-bold text-blue-800">{tier.tier_name}</h5>
+                          <div className="flex flex-col items-start">
+                            <div className="flex items-center">
+                              {tier.tier_type === 'Quà tặng' && <Gift className="h-5 w-5 text-pink-500 mr-2 mt-0.5" />}
+                              <h5 className="font-bold text-blue-800">{tier.tier_name}</h5>
+                            </div>
+                            {/* HIỂN THỊ LABEL ON-TOP Ở CHẾ ĐỘ XEM */}
+                            {tier.is_ontop && (
+                              <span className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-800 border border-yellow-200 uppercase tracking-wider">
+                                <Layers className="w-3 h-3 mr-1" /> Cộng dồn (On-top)
+                              </span>
+                            )}
                           </div>
                           {tier.support_amount > 0 && (
                             <div className="text-right">
@@ -607,6 +618,7 @@ export default function Promotions() {
                     tier_type: 'Chiết khấu số lượng', 
                     support_amount: 0, 
                     min_total_qty: 0, 
+                    is_ontop: false,
                     conditions: [{ condition_type: 'Dòng sản phẩm', target_values: '', min_target_value: 1 }] 
                   });
                   setEditForm({...editForm, tiers: newTiers});
@@ -632,7 +644,7 @@ export default function Promotions() {
                 
                 <h4 className="text-indigo-600 font-bold mb-4">Gói #{tIdx + 1}</h4>
                 
-                <div className="grid grid-cols-3 gap-4 mb-4">
+                <div className="grid grid-cols-3 gap-4 mb-2">
                   <div className="col-span-2">
                     <label className="block text-xs font-medium text-gray-500 uppercase">Tên gói</label>
                     <input 
@@ -663,6 +675,26 @@ export default function Promotions() {
                       <option value="Thưởng nóng">Thưởng nóng</option>
                     </select>
                   </div>
+                </div>
+
+                {/* GIAO DIỆN CHỌN ON-TOP TRONG FORM */}
+                <div className="mb-4 bg-yellow-50/50 p-3 rounded-lg border border-yellow-200 transition-colors hover:bg-yellow-50">
+                  <label className="flex items-center space-x-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={tier.is_ontop || false}
+                      onChange={e => {
+                        const newTiers = [...(editForm.tiers || [])];
+                        newTiers[tIdx].is_ontop = e.target.checked;
+                        setEditForm({...editForm, tiers: newTiers});
+                      }}
+                      className="w-4 h-4 text-yellow-600 rounded border-yellow-300 focus:ring-yellow-500"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold text-yellow-900">Cho phép Cộng dồn (On-top)</span>
+                      <span className="text-xs text-yellow-700">Gói này sẽ được cộng thêm vào phần quà/chiết khấu cao nhất thay vì bị ghi đè.</span>
+                    </div>
+                  </label>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 mb-4">
@@ -742,7 +774,6 @@ export default function Promotions() {
                                 newTiers[tIdx].gifts = [{ gift_product_id: newTiers[tIdx].gift_product_id || '', gift_quantity: newTiers[tIdx].gift_quantity || 1 }];
                               }
                               newTiers[tIdx].gifts![gIdx].gift_product_id = e.target.value;
-                              // Also update the root fields for backward compatibility if it's the first item
                               if (gIdx === 0) {
                                 newTiers[tIdx].gift_product_id = e.target.value;
                               }

@@ -347,7 +347,7 @@ export default function AdminDashboard() {
 
     const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
 
-    let emailBody = `Đây là báo cáo tự động được gửi từ ứng dụng PC Canteen Web APP.\n\n`;
+    let emailBody = `Đây là báo cáo tự động được gửi từ ứng dụng DUC PG Activation Web APP.\n\n`;
 
     emailBody += `--- 1. TỔNG QUAN ---\n`;
     emailBody += `- Tổng doanh thu: ${formatCurrency(data.totalRevenue)}\n`;

@@ -20,18 +20,18 @@ export default function Layout() {
 
   const adminNavigation = [
     { name: 'Bảng điều khiển', href: '/dashboard', icon: LayoutDashboard, category: 'Main' },
-    { name: 'Người dùng', href: '/dashboard/admin/profiles', icon: Users, category: 'Dữ liệu' },
-    { name: 'Vai trò (Roles)', href: '/dashboard/admin/roles', icon: Users, category: 'Dữ liệu' },
-    { name: 'Cửa hàng (Shops)', href: '/dashboard/admin/shops', icon: Store, category: 'Dữ liệu' },
-    { name: 'Accounts', href: '/dashboard/admin/accounts', icon: Store, category: 'Dữ liệu' },
-    { name: 'Channels', href: '/dashboard/admin/channels', icon: Store, category: 'Dữ liệu' },
-    { name: 'Thương hiệu', href: '/dashboard/admin/brands', icon: Tag, category: 'Dữ liệu' },
-    { name: 'Sản phẩm', href: '/dashboard/admin/products', icon: Package, category: 'Dữ liệu' },
-    { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Dữ liệu' },
-    { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Chỉ tiêu' },
-    { name: 'Khuyến mãi', href: '/dashboard/admin/promotions', icon: Target, category: 'Chỉ tiêu' },
-    { name: 'Lịch bán hàng', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Chỉ tiêu' },
-    { name: 'Chỉ tiêu doanh số', href: '/dashboard/admin/kpis', icon: Target, category: 'Chỉ tiêu' },
+    { name: 'Người dùng', href: '/dashboard/admin/profiles', icon: Users, category: 'Người dùng, Vai trò' },
+    { name: 'Vai trò (Roles)', href: '/dashboard/admin/roles', icon: Users, category: 'Người dùng, Vai trò' },
+    { name: 'Channels', href: '/dashboard/admin/channels', icon: Store, category: 'Channel, Account, Cửa hàng' },
+    { name: 'Accounts', href: '/dashboard/admin/accounts', icon: Store, category: 'Channel, Account, Cửa hàng' },
+    { name: 'Cửa hàng (Shops)', href: '/dashboard/admin/shops', icon: Store, category: 'Channel, Account, Cửa hàng' },
+    { name: 'Thương hiệu', href: '/dashboard/admin/brands', icon: Tag, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
+    { name: 'Sản phẩm', href: '/dashboard/admin/products', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
+    { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
+    { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Hoạt động' },
+    { name: 'Khuyến mãi', href: '/dashboard/admin/promotions', icon: Target, category: 'Hoạt động' },
+    { name: 'Lịch bán hàng', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Hoạt động' },
+    { name: 'Chỉ tiêu doanh số', href: '/dashboard/admin/kpis', icon: Target, category: 'Hoạt động' },
     { name: 'Nhập đơn hàng bán', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
     { name: 'Báo cáo PG', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
   ];
@@ -56,7 +56,7 @@ export default function Layout() {
       {/* Sidebar for desktop, bottom nav for mobile */}
       <nav className="md:w-64 bg-white border-r border-gray-200 flex-shrink-0 flex md:flex-col justify-between md:justify-start fixed bottom-0 w-full md:relative z-10">
         <div className="p-4 hidden md:block border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-800">PC Canteen Web APP</h1>
+          <h1 className="text-xl font-bold text-gray-800">DUC PG Activation Web APP</h1>
           <p className="text-sm text-gray-500 mt-1">{user?.full_name}</p>
           <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10 mt-2">
             {isAdmin ? 'Quản trị viên' : 'Nhân viên PG'}
@@ -117,7 +117,7 @@ export default function Layout() {
         {/* Mobile header */}
         <div className="md:hidden bg-white border-b border-gray-200 p-4 flex justify-between items-center sticky top-0 z-10">
           <div>
-            <h1 className="text-lg font-bold text-gray-800">PC Canteen Web APP</h1>
+            <h1 className="text-lg font-bold text-gray-800">DUC PG Activation Web APP</h1>
             <p className="text-xs text-gray-500">{user?.full_name} ({isAdmin ? 'Quản trị viên' : 'Nhân viên PG'})</p>
           </div>
           <button onClick={signOut} className="text-gray-500 p-2">

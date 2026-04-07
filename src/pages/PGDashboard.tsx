@@ -9,7 +9,7 @@ interface Product {
   product_name: string;
   value: number;
   item_type?: 'Sản phẩm bán' | 'Quà tặng' | 'Mẫu thử';
-  brands: any;
+  brand_name: string;
 }
 
 interface CartItem {
@@ -21,7 +21,6 @@ interface CartItem {
   switched_from_brand?: string | null;
 }
 
-// Hàm hỗ trợ định dạng số có dấu chấm
 const formatNumber = (numStr: string) => {
   const rawValue = numStr.replace(/\D/g, ""); 
   return rawValue.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
@@ -31,7 +30,8 @@ export default function PGDashboard() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
-  // --- STATE NHẬP LIỆU ---
+  // --- STATE (CÁC BIẾN TRÊN FORM) ---
+  const [selectedShopId, setSelectedShopId] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [qty, setQty] = useState(1);
@@ -43,603 +43,339 @@ export default function PGDashboard() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [applicableGifts, setApplicableGifts] = useState<any[]>([]);
 
-  // --- STATE SỬA ĐƠN HÀNG (MODAL) ---
-  const [editingItem, setEditingItem] = useState<any>(null);
-  const [editQty, setEditQty] = useState(1);
-  const [editAmount, setEditAmount] = useState('');
+  // Lấy chuỗi ngày YYYY-MM-DD theo giờ địa phương
+  const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0];
 
-  // --- THỜI GIAN ---
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
-  
-  // Lấy chuỗi YYYY-MM-DD của ngày hôm nay để so sánh
-  const todayStr = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+  // --- FETCH DATA TỪ DATABASE ---
 
-  // --- HÀM TẠO ID GIỎ HÀNG ---
-  const generateUniqueCartId = async (): Promise<string> => {
-    let isUnique = false;
-    let newId = '';
-    while (!isUnique) {
-      const datePart = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-      const randomPart = Math.random().toString(36).substring(2, 6).toUpperCase();
-      newId = `CART-${datePart}-${randomPart}`;
-      const { data } = await supabase.from('orders').select('cart_id').eq('cart_id', newId).limit(1);
-      if (!data || data.length === 0) isUnique = true;
-    }
-    return newId;
-  };
-
-  // 1. FETCH DATA
-  const { data: products = [] } = useQuery({
-    queryKey: ['products'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('products').select(`product_id, product_name, value, item_type, brands(brand_name)`).order('product_name');
-      if (error) {
-        console.error('Error fetching products:', error);
-        toast.error('Lỗi tải danh sách sản phẩm');
-      }
-      return (data || []) as Product[];
-    }
-  });
-
-  const { data: recentOrders = [] } = useQuery({
-    queryKey: ['recent_orders', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      const { data } = await supabase.from('orders').select(`id, cart_id, product_id, qty, net_value, switched_from_brand, created_at, products(product_name)`).eq('pg_id', user.id).order('created_at', { ascending: false });
-      return data || [];
-    }
-  });
-
-  const { data: kpis = [] } = useQuery({
-    queryKey: ['kpis', user?.id],
-    queryFn: async () => {
-      if (!user?.id) return [];
-      const { data } = await supabase.from('kpis').select('*').eq('pg_id', user.id).gte('end_date', new Date().toISOString().split('T')[0]);
-      return data || [];
-    },
-    enabled: !!user?.id,
-  });
-
+  // 1. Lấy danh sách Cửa hàng của PG
   const { data: shops = [] } = useQuery({
     queryKey: ['pg_shops', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data, error } = await supabase
-        .from('schedules')
-        .select('shop_id, shops(shop_name)')
-        .eq('pg_id', user.id);
-      
-      if (error) {
-        console.error('Error fetching shops:', error);
-        return [];
-      }
-      
-      // Deduplicate shops
+      const { data } = await supabase.from('schedules').select('shop_id, shops(shop_name)').eq('pg_id', user.id);
       const uniqueShops = new Map();
-      data.forEach((item: any) => {
-        if (item.shop_id && item.shops) {
-          uniqueShops.set(item.shop_id, { shop_id: item.shop_id, shop_name: item.shops.shop_name });
-        }
-      });
+      data?.forEach((item: any) => { if (item.shop_id) uniqueShops.set(item.shop_id, item); });
       return Array.from(uniqueShops.values());
     },
     enabled: !!user?.id,
   });
 
-  const { data: promotions = [] } = useQuery({
-    queryKey: ['active_promotions'],
+  // 2. Lấy danh sách Sản phẩm được phép bán (Từ SQL View)
+  const { data: products = [] } = useQuery({
+    queryKey: ['allowed_products', user?.id, selectedShopId], 
     queryFn: async () => {
-      const { data, error } = await supabase.from('promotions').select('*');
-      if (error) throw error;
+      if (!user?.id || !selectedShopId) return [];
+      const { data, error } = await supabase
+        .from('v_pg_allowed_products')
+        .select('*')
+        .eq('pg_id', user.id)
+        .eq('shop_id', selectedShopId)
+        .lte('start_date', todayStr)
+        .gte('end_date', todayStr)
+        .order('product_name');
+        
+      if (error) {
+        console.error('Lỗi tải sản phẩm:', error);
+        return [];
+      }
+      return data as Product[];
+    },
+    enabled: !!user?.id && !!selectedShopId,
+  });
+
+  // 3. Lấy Doanh số hôm nay (Từ SQL View)
+  const { data: todaySales = 0 } = useQuery({
+    queryKey: ['todaySales', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return 0;
+      const { data } = await supabase.from('v_pg_sales_summary')
+        .select('total_sales').eq('pg_id', user.id).eq('sale_date', todayStr).single();
+      return data?.total_sales || 0;
+    },
+    enabled: !!user?.id,
+  });
+
+  // 4. Lấy dữ liệu Khuyến mãi
+  const { data: activePromotions = [] } = useQuery({
+    queryKey: ['active_promotions', selectedShopId],
+    queryFn: async () => {
+      const { data: promos } = await supabase.from('promotions').select('*');
+      if (!promos) return [];
       
-      const promotionsWithDetails = await Promise.all((data || []).map(async (p) => {
-        const { data: tiersData } = await supabase.from('promotion_tiers').select('*').eq('promotion_id', p.promotion_id);
-        const tiers = await Promise.all((tiersData || []).map(async (t) => {
-          const { data: conditionsData } = await supabase.from('promotion_conditions').select('*').eq('tier_id', t.id);
-          return { ...t, conditions: conditionsData || [] };
+      return await Promise.all(promos.map(async (p) => {
+        const { data: tiers } = await supabase.from('promotion_tiers').select('*').eq('promotion_id', p.promotion_id);
+        const tiersWithConditions = await Promise.all((tiers || []).map(async (t) => {
+          const { data: conds } = await supabase.from('promotion_conditions').select('*').eq('tier_id', t.id);
+          return { ...t, conditions: conds || [] };
         }));
-        return { ...p, tiers };
+        return { ...p, tiers: tiersWithConditions };
       }));
-      
-      return promotionsWithDetails;
     }
   });
 
-  const [selectedShopId, setSelectedShopId] = useState('');
-
-  // Auto-select shop if there's only one
+  // --- USE EFFECTS LÀM MƯỢT FORM ---
+  
+  // Tự động chọn cửa hàng nếu PG chỉ có 1 lịch
   useEffect(() => {
-    if (shops.length === 1 && !selectedShopId) {
-      setSelectedShopId(shops[0].shop_id);
-    }
+    if (shops.length === 1 && !selectedShopId) setSelectedShopId(shops[0].shop_id);
   }, [shops, selectedShopId]);
 
-  // 2. TÍNH TOÁN DOANH SỐ & KPI
-  const totalTarget = kpis.reduce((sum, kpi) => sum + Number(kpi.sale_target), 0);
-  
-  // Doanh số tháng (Không tính hàng đối thủ)
-  const currentMonthSales = recentOrders
-    .filter((o: any) => !o.switched_from_brand)
-    .reduce((sum, order) => sum + Number(order.net_value), 0);
-  
-  const kpiProgress = totalTarget > 0 ? Math.min((currentMonthSales / totalTarget) * 100, 100) : 0;
-
-  // Doanh số hôm nay (Bao gồm tất cả đơn trong ngày)
-  const todaySales = recentOrders
-    .filter((o: any) => o.created_at.startsWith(todayStr))
-    .reduce((sum, order) => sum + Number(order.net_value), 0);
-
-  // Gom nhóm dữ liệu lịch sử
-  const groupedOrders = recentOrders.reduce((acc: any, current: any) => {
-    if (!acc[current.cart_id]) {
-      acc[current.cart_id] = { cart_id: current.cart_id, created_at: current.created_at, items: [], total: 0 };
-    }
-    acc[current.cart_id].items.push(current);
-    acc[current.cart_id].total += Number(current.net_value);
-    return acc;
-  }, {});
-
-  // 3. LOGIC TÍNH TIỀN TỰ ĐỘNG
+  // Tự động điền giá tiền khi chọn sản phẩm
   useEffect(() => {
     const product = products.find(p => p.product_id === selectedProductId);
     if (product && qty > 0) {
-      const effectiveType = product.item_type || selectedProductType;
-      if (effectiveType === 'Sản phẩm bán') {
-        setCustomAmount(formatNumber((product.value * qty).toString()));
-      } else {
-        setCustomAmount('0');
-      }
-    } else {
-      setCustomAmount('');
-    }
+      setCustomAmount(product.item_type === 'Sản phẩm bán' || selectedProductType === 'Bán hàng' ? formatNumber((product.value * qty).toString()) : '0');
+    } else setCustomAmount('');
   }, [selectedProductId, qty, products, selectedProductType]);
 
-  // 4. LOGIC THÊM VÀO GIỎ HÀNG
-  const uniqueBrands = Array.from(new Set(products.map(p => p.brands?.brand_name).filter(Boolean) as string[]));
-  const filteredProducts = selectedBrand ? products.filter(p => p.brands?.brand_name === selectedBrand) : products;
+  // --- LOGIC FORM NHẬP LIỆU ---
+  
+  const uniqueBrands = Array.from(new Set(products.map(p => p.brand_name).filter(Boolean) as string[]));
+  const filteredProducts = selectedBrand 
+    ? products.filter(p => p.brand_name === selectedBrand) 
+    : products;
 
   const addToCart = () => {
     const product = products.find(p => p.product_id === selectedProductId);
     const finalAmount = parseInt(customAmount.replace(/\./g, ''), 10);
-    
     if (!product || qty <= 0 || isNaN(finalAmount)) return;
-    
-    // Nếu sản phẩm được định nghĩa là Quà tặng/Mẫu thử trong hệ thống, ưu tiên loại đó
-    const effectiveType = (product as any).item_type || selectedProductType;
 
     setCart([...cart, { 
       product_id: product.product_id, 
       product_name: product.product_name, 
-      qty, 
-      net_value: finalAmount,
-      item_type: effectiveType as any,
-      switched_from_brand: isConverted ? competitorBrand : (effectiveType !== 'Bán hàng' ? effectiveType.toUpperCase() : null)
+      qty, net_value: finalAmount,
+      item_type: (product as any).item_type || selectedProductType,
+      switched_from_brand: isConverted ? competitorBrand : null
     }]);
     
-    // Reset form nhập liệu nhưng giữ nguyên Giỏ hàng
-    setSelectedProductId(''); 
-    setQty(1);
-    setCustomAmount('');
-    setIsConverted(false);
-    setCompetitorBrand('');
-    setSelectedProductType('Bán hàng');
-  };
-
-  const removeFromCart = (index: number) => {
-    const newCart = [...cart];
-    newCart.splice(index, 1);
-    setCart(newCart);
+    // Reset form sau khi thêm
+    setSelectedProductId(''); setQty(1); setCustomAmount(''); setIsConverted(false); setCompetitorBrand('');
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.net_value, 0);
 
-  // 4.5 LOGIC KIỂM TRA KHUYẾN MÃI
+  // --- THUẬT TOÁN TÍNH KHUYẾN MÃI TỰ ĐỘNG ---
   useEffect(() => {
     if (cart.length === 0) {
       setApplicableGifts([]);
       return;
     }
 
-    const gifts: any[] = [];
-    
-    promotions.forEach((promo: any) => {
-      // Kiểm tra phạm vi (Shop, Account, Channel)
-      const matchesShop = !promo.shop_id || promo.shop_id === selectedShopId;
-      // Thêm logic check account/channel nếu cần
-      
-      if (matchesShop) {
-        promo.tiers?.forEach((tier: any) => {
-          // Kiểm tra điều kiện tổng tiền tối thiểu của gói
-          if (cartTotal >= tier.min_total_qty) {
-            // Kiểm tra các điều kiện đi kèm (Dòng sản phẩm, Sản phẩm cụ thể, Nhãn hàng)
-            let allConditionsMet = true;
+    let eligibleNormalTiers: any[] = [];
+    let eligibleOntopTiers: any[] = [];
+
+    activePromotions.forEach((promo: any) => {
+      if (promo.shop_id && promo.shop_id !== selectedShopId) return;
+
+      promo.tiers?.forEach((tier: any) => {
+        if (cartTotal >= tier.min_total_qty) {
+          
+          let allConditionsMet = true;
+          
+          tier.conditions?.forEach((cond: any) => {
+            // Xử lý target_values (có thể là Array từ DB)
+            const targetValuesStr = Array.isArray(cond.target_values) 
+              ? cond.target_values.join(',').toLowerCase() 
+              : String(cond.target_values || '').toLowerCase();
+              
+            let conditionValue = 0;
             
-            tier.conditions?.forEach((cond: any) => {
-              const targetValues = cond.target_values.split(',').map((v: string) => v.trim().toLowerCase());
-              let conditionValue = 0;
+            cart.forEach(item => {
+              const product = products.find(p => p.product_id === item.product_id);
+              if (!product) return;
               
-              cart.forEach(item => {
-                const product = products.find(p => p.product_id === item.product_id);
-                if (!product) return;
-                
-                if (cond.condition_type === 'Nhãn hàng') {
-                  if (targetValues.includes(product.brands?.brand_name?.toLowerCase())) {
-                    conditionValue += item.net_value;
-                  }
-                } else if (cond.condition_type === 'Sản phẩm cụ thể') {
-                  if (targetValues.includes(product.product_name.toLowerCase())) {
-                    conditionValue += item.net_value;
-                  }
-                } else if (cond.condition_type === 'Dòng sản phẩm') {
-                  // Giả sử dòng sản phẩm nằm trong tên hoặc brand
-                  if (product.product_name.toLowerCase().includes(cond.target_values.toLowerCase())) {
-                    conditionValue += item.net_value;
-                  }
-                }
-              });
-              
-              if (conditionValue < cond.min_target_value) {
-                allConditionsMet = false;
+              if (cond.condition_type === 'Nhãn hàng' && targetValuesStr.includes(product.brand_name.toLowerCase())) {
+                conditionValue += item.net_value;
+              } else if (cond.condition_type === 'Sản phẩm cụ thể' && targetValuesStr.includes(product.product_name.toLowerCase())) {
+                conditionValue += item.net_value;
               }
             });
             
-            if (allConditionsMet && tier.tier_type === 'Quà tặng' && tier.gift_product_id) {
-              const giftProduct = products.find(p => p.product_id === tier.gift_product_id);
-              if (giftProduct) {
-                gifts.push({
-                  product_name: giftProduct.product_name,
-                  qty: tier.gift_quantity || 1,
-                  tier_name: tier.tier_name
-                });
+            if (conditionValue < cond.min_target_value) {
+              allConditionsMet = false;
+            }
+          });
+
+          if (allConditionsMet && tier.tier_type === 'Quà tặng' && tier.gift_product_id) {
+            const giftProduct = products.find(p => p.product_id === tier.gift_product_id);
+            if (giftProduct) {
+              const giftData = {
+                product_id: giftProduct.product_id,
+                product_name: giftProduct.product_name,
+                qty: tier.gift_quantity || 1,
+                tier_name: tier.tier_name,
+                min_total_qty: tier.min_total_qty 
+              };
+
+              // Phân loại ONTOP (cộng dồn) và NORMAL (chỉ lấy cao nhất)
+              if (tier.is_ontop) {
+                eligibleOntopTiers.push(giftData);
+              } else {
+                eligibleNormalTiers.push(giftData);
               }
             }
           }
-        });
-      }
+        }
+      });
     });
-    
-    setApplicableGifts(gifts);
-  }, [cart, cartTotal, promotions, products, selectedShopId]);
 
-  // --- 5. CÁC MUTATIONS (THÊM, SỬA, XÓA TRÊN DATABASE) ---
+    // Lọc Rổ NORMAL: Chỉ lấy 1 mức có yêu cầu tiền cao nhất
+    eligibleNormalTiers.sort((a, b) => b.min_total_qty - a.min_total_qty);
+    const finalNormalGift = eligibleNormalTiers.length > 0 ? [eligibleNormalTiers[0]] : [];
+
+    // Gộp 2 rổ lại
+    setApplicableGifts([...finalNormalGift, ...eligibleOntopTiers]);
+
+  }, [cart, cartTotal, activePromotions, products, selectedShopId]);
+
+
+  // --- MUTATION: LƯU DB (SỬ DỤNG RPC) ---
   const submitOrderMutation = useMutation({
     mutationFn: async () => {
-      const finalCartId = await generateUniqueCartId();
+      // 1. Tạo Cart ID
+      const { data: finalCartId, error: idError } = await supabase.rpc('generate_cart_id');
+      if (idError) throw idError;
       
-      // Chuẩn bị các sản phẩm chính
-      const ordersToInsert = cart.map(item => ({
+      // 2. Gom dữ liệu Sản phẩm bán
+      const sellItems = cart.map(item => ({
         cart_id: finalCartId,
         pg_id: user?.id,
         product_id: item.product_id,
         qty: item.qty,
         net_value: item.net_value,
-        switched_from_brand: item.switched_from_brand,
-        created_at: new Date().toISOString()
+        switched_from_brand: item.switched_from_brand
       }));
 
-      // Chuẩn bị các sản phẩm quà tặng
-      const giftsToInsert = applicableGifts.map(gift => {
-        const giftProduct = products.find(p => p.product_name === gift.product_name);
-        return {
-          cart_id: finalCartId,
-          pg_id: user?.id,
-          product_id: giftProduct?.product_id,
-          qty: gift.qty,
-          net_value: 0, // Quà tặng có giá trị 0
-          switched_from_brand: `QUÀ TẶNG: ${gift.tier_name}`,
-          created_at: new Date().toISOString()
-        };
-      });
-      
-      const allOrders = [...ordersToInsert, ...giftsToInsert];
+      // 3. Gom dữ liệu Quà tặng
+      const giftItems = applicableGifts.map(gift => ({
+        cart_id: finalCartId,
+        pg_id: user?.id,
+        product_id: gift.product_id,
+        qty: gift.qty,
+        net_value: 0,
+        switched_from_brand: `QUÀ TẶNG: ${gift.tier_name}` 
+      }));
 
-      const { error } = await supabase.from('orders').insert(allOrders);
-      if (error) throw error;
+      // Gộp chung 
+      const jsonPayload = [...sellItems, ...giftItems];
+
+      // 4. Đẩy xuống Database xử lý Insert + Trừ kho
+      const { error: submitError } = await supabase.rpc('luu_don_hang', { p_cart_items: jsonPayload });
+      if (submitError) throw submitError;
     },
     onSuccess: () => {
-      toast.success('🎉 Đã ghi nhận hóa đơn thành công!');
+      toast.success('🎉 Đã ghi nhận hóa đơn và trừ kho thành công!');
       setCart([]);
-      queryClient.invalidateQueries({ queryKey: ['recent_orders'] });
+      setApplicableGifts([]);
+      queryClient.invalidateQueries({ queryKey: ['todaySales'] }); 
     },
     onError: (error: any) => toast.error(`Lỗi: ${error.message}`)
-  });
-
-  const deleteCartMutation = useMutation({
-    mutationFn: async (cartId: string) => {
-      const { error } = await supabase.from('orders').delete().eq('cart_id', cartId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('🗑️ Đã xóa hóa đơn!');
-      queryClient.invalidateQueries({ queryKey: ['recent_orders'] });
-    }
-  });
-
-  const updateItemMutation = useMutation({
-    mutationFn: async () => {
-      const finalAmount = parseInt(editAmount.replace(/\./g, ''), 10);
-      const { error } = await supabase.from('orders')
-        .update({ qty: editQty, net_value: finalAmount })
-        .eq('id', editingItem.id);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('✏️ Đã cập nhật sản phẩm!');
-      setEditingItem(null);
-      queryClient.invalidateQueries({ queryKey: ['recent_orders'] });
-    }
-  });
-
-  const deleteItemMutation = useMutation({
-    mutationFn: async (itemId: string) => {
-      const { error } = await supabase.from('orders').delete().eq('id', itemId);
-      if (error) throw error;
-    },
-    onSuccess: () => {
-      toast.success('🗑️ Đã xóa sản phẩm khỏi hóa đơn!');
-      queryClient.invalidateQueries({ queryKey: ['recent_orders'] });
-    }
   });
 
   return (
     <div className="space-y-6 max-w-lg mx-auto pb-10 px-4">
       <h2 className="text-2xl font-bold text-gray-900 pt-6">Bảng điều khiển PG</h2>
 
-      {/* 1. WIDGET BÁO CÁO KÉP (Hôm nay + Tháng) */}
-      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white flex flex-col gap-4">
-        <div className="border-b border-white/20 pb-4">
-          <h3 className="text-sm font-medium text-indigo-100 mb-1">Doanh số Hôm nay</h3>
-          <div className="text-3xl font-extrabold tracking-tight text-yellow-300">
-            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(todaySales)}
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-xs font-medium text-indigo-100 mb-1 uppercase tracking-wider">Lũy kế Tháng này</h3>
-          <div className="text-xl font-bold mb-2">
-            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(currentMonthSales)}
-          </div>
-          <div className="flex justify-between text-[10px] mb-1 opacity-90">
-            <span>Tiến độ: {kpiProgress.toFixed(1)}%</span>
-            <span>Mục tiêu: {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(totalTarget)}</span>
-          </div>
-          <div className="w-full bg-white/20 rounded-full h-1.5">
-            <div className="bg-green-400 h-1.5 rounded-full transition-all duration-500" style={{ width: `${kpiProgress}%` }}></div>
-          </div>
+      {/* WIDGET BÁO CÁO */}
+      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">
+        <h3 className="text-sm font-medium text-indigo-100 mb-1">Doanh số Hôm nay</h3>
+        <div className="text-3xl font-extrabold text-yellow-300">
+          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(todaySales)}
         </div>
       </div>
 
-      {/* 2. KHU VỰC NHẬP GIỎ HÀNG */}
-      <div className="bg-white shadow-lg rounded-2xl p-5 border border-gray-100">
-        <div className="space-y-3">
-          {/* Chọn cửa hàng */}
-          {shops.length > 0 && (
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Cửa hàng làm việc</label>
-              {shops.length === 1 ? (
-                <div className="w-full p-2.5 border border-gray-200 rounded-xl bg-gray-50 text-sm font-medium text-gray-700">
-                  {shops[0].shop_name}
-                </div>
-              ) : (
-                <select 
-                  className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-sm font-medium text-gray-700 focus:ring-indigo-500 focus:border-indigo-500"
-                  value={selectedShopId}
-                  onChange={(e) => setSelectedShopId(e.target.value)}
-                >
-                  <option value="">-- Chọn cửa hàng --</option>
-                  {shops.map((shop: any) => (
-                    <option key={shop.shop_id} value={shop.shop_id}>{shop.shop_name}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-          )}
+      {/* KHU VỰC NHẬP LIỆU (FORM) */}
+      <div className="bg-white shadow-lg rounded-2xl p-5 border border-gray-100 space-y-4">
+        
+        <select className="w-full p-2.5 border rounded-xl" value={selectedShopId} onChange={e => setSelectedShopId(e.target.value)}>
+          <option value="">-- Chọn cửa hàng làm việc --</option>
+          {shops.map((s: any) => <option key={s.shop_id} value={s.shop_id}>{s.shops?.shop_name}</option>)}
+        </select>
 
-          {/* Lọc hãng */}
-          <select 
-            className="w-full p-2.5 border border-gray-300 rounded-xl bg-gray-50 text-sm font-medium text-gray-700 focus:ring-indigo-500 focus:border-indigo-500" 
-            value={selectedBrand} 
-            onChange={(e) => { setSelectedBrand(e.target.value); setSelectedProductId(''); }}
-          >
-            <option value="">-- Lọc theo Nhãn hàng --</option>
-            {uniqueBrands.map((b, i) => <option key={i} value={b}>{b}</option>)}
+        <div className="flex gap-2">
+          <select className="flex-1 p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductId('');}}>
+            <option value="">-- Lọc Hãng --</option>
+            {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
-
-          {/* Chọn món */}
-          <select 
-            className="w-full p-2.5 border border-gray-300 rounded-xl text-sm focus:ring-indigo-500 focus:border-indigo-500" 
-            value={selectedProductId} 
-            onChange={(e) => setSelectedProductId(e.target.value)}
-          >
-            <option value="" disabled>Chọn sản phẩm...</option>
+          <select className="flex-1 p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
+            <option value="" disabled>Chọn SP...</option>
             {filteredProducts.map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
           </select>
-            
-          {/* Số lượng + Loại + Số tiền + Nút thêm */}
-          <div className="flex space-x-2">
-            <div className="flex flex-col w-16">
-              <label className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">SL</label>
-              <input 
-                type="number" min="1" 
-                className="w-full p-2.5 border border-gray-300 rounded-xl text-center text-sm font-medium focus:ring-indigo-500 focus:border-indigo-500" 
-                value={qty} onChange={(e) => setQty(parseInt(e.target.value) || 1)} placeholder="SL"
-              />
-            </div>
-            
-            <div className="flex flex-col flex-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Loại</label>
-              <select
-                className="w-full p-2.5 border border-gray-300 rounded-xl text-sm font-medium focus:ring-indigo-500 focus:border-indigo-500 bg-white"
-                value={selectedProductType}
-                onChange={(e) => setSelectedProductType(e.target.value as any)}
-              >
-                <option value="Bán hàng">Bán hàng</option>
-                <option value="Quà tặng">Quà tặng</option>
-                <option value="Mẫu thử">Mẫu thử</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col flex-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase mb-0.5 ml-1">Số tiền</label>
-              <div className="relative">
-                <input 
-                  type="text" 
-                  className="w-full p-2.5 pr-6 border border-gray-300 rounded-xl text-right text-sm font-bold text-indigo-700 bg-indigo-50/30 focus:ring-indigo-500 focus:border-indigo-500" 
-                  value={customAmount} onChange={(e) => setCustomAmount(formatNumber(e.target.value))} placeholder="Số tiền"
-                />
-                <span className="absolute right-2 top-2.5 text-gray-500 text-sm">đ</span>
-              </div>
-            </div>
-          </div>
-
-          {/* LOGIC ĐỐI THỦ (Đưa vào đây để gắn với từng sản phẩm) */}
-          <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 transition-all">
-            <label className="flex items-center space-x-2 text-sm font-medium text-indigo-900 cursor-pointer">
-              <input type="checkbox" checked={isConverted} onChange={(e) => setIsConverted(e.target.checked)} className="rounded text-indigo-600 w-4 h-4" />
-              <span>Sản phẩm này là khách đổi từ hãng khác?</span>
-            </label>
-            {isConverted && (
-              <input 
-                type="text" placeholder="Nhập tên hãng đối thủ (VD: Huggies)..." 
-                className="mt-3 w-full p-2 border border-indigo-200 rounded-lg text-sm focus:ring-indigo-500"
-                value={competitorBrand} onChange={(e) => setCompetitorBrand(e.target.value)}
-              />
-            )}
-          </div>
-
-          {/* Nút Thêm vào giỏ */}
-          <button 
-            onClick={addToCart} 
-            disabled={!selectedProductId || !customAmount || (isConverted && !competitorBrand)} 
-            className="w-full bg-indigo-100 text-indigo-700 py-2.5 rounded-xl font-bold flex items-center justify-center disabled:opacity-50 active:scale-95 transition-transform"
-          >
-            + THÊM VÀO GIỎ
-          </button>
         </div>
 
-        {/* HIỂN THỊ GIỎ HÀNG TẠM */}
-        {cart.length > 0 && (
-          <div className="mt-5 bg-gray-50 rounded-xl p-4 border border-dashed border-gray-300">
-            <ul className="space-y-3 mb-3">
-              {cart.map((item, idx) => (
-                <li key={idx} className="flex flex-col border-b border-gray-200 pb-2 last:border-0 last:pb-0">
-                  <div className="flex justify-between items-center text-sm">
-                    <div className="flex flex-col flex-1 pr-2 truncate">
-                      <span className="text-gray-800 font-medium">{item.qty}x {item.product_name}</span>
-                      {item.item_type !== 'Bán hàng' && (
-                        <span className={`text-[10px] font-bold uppercase w-fit px-1.5 rounded ${
-                          item.item_type === 'Quà tặng' ? 'bg-pink-100 text-pink-800' : 'bg-yellow-100 text-yellow-800'
-                        }`}>
-                          {item.item_type}
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center space-x-3">
-                      <span className="font-bold text-gray-900">{new Intl.NumberFormat('vi-VN').format(item.net_value)}đ</span>
-                      <button onClick={() => removeFromCart(idx)} className="text-red-500 font-bold bg-red-50 w-6 h-6 rounded-md flex items-center justify-center">✕</button>
-                    </div>
-                  </div>
-                  {item.switched_from_brand && item.item_type === 'Bán hàng' && (
-                    <span className="text-[10px] text-green-700 bg-green-100 px-2 py-0.5 rounded w-fit mt-1">Đổi từ: {item.switched_from_brand}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-            <div className="border-t border-gray-300 pt-3 flex justify-between items-center font-bold text-lg text-indigo-700">
-              <span>Tổng giỏ hàng:</span>
-              <span className="text-xl">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(cartTotal)}</span>
-            </div>
-
-            {applicableGifts.length > 0 && (
-              <div className="mt-4 p-3 bg-pink-50 rounded-xl border border-pink-200">
-                <h4 className="text-xs font-bold text-pink-700 uppercase mb-2 flex items-center">
-                  <span className="mr-1">🎁</span> Quà tặng kèm theo
-                </h4>
-                <ul className="space-y-1">
-                  {applicableGifts.map((gift, idx) => (
-                    <li key={idx} className="text-sm text-pink-800 flex justify-between">
-                      <span>{gift.product_name} ({gift.tier_name})</span>
-                      <span className="font-bold">x{gift.qty}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+        <div className="flex gap-2 items-end">
+          <div className="w-20">
+            <label className="text-xs text-gray-400">SL</label>
+            <input type="number" min="1" className="w-full p-2.5 border rounded-xl text-center" value={qty} onChange={e => setQty(parseInt(e.target.value)||1)} />
           </div>
-        )}
+          <div className="flex-1">
+            <label className="text-xs text-gray-400">Số tiền (đ)</label>
+            <input type="text" className="w-full p-2.5 border rounded-xl text-right font-bold text-indigo-700 bg-indigo-50" value={customAmount} onChange={e => setCustomAmount(formatNumber(e.target.value))} />
+          </div>
+        </div>
 
-        <button
-          onClick={() => submitOrderMutation.mutate()}
-          disabled={cart.length === 0 || submitOrderMutation.isPending}
-          className="w-full mt-5 bg-indigo-600 text-white py-3.5 rounded-xl font-bold uppercase tracking-wider shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50"
-        >
-          {submitOrderMutation.isPending ? 'Đang lưu...' : 'XÁC NHẬN LƯU GIỎ HÀNG'}
+        <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100">
+          <label className="flex items-center space-x-2 text-sm text-indigo-900 cursor-pointer">
+            <input type="checkbox" checked={isConverted} onChange={e => setIsConverted(e.target.checked)} className="rounded text-indigo-600" />
+            <span>Sản phẩm này là khách đổi từ hãng khác?</span>
+          </label>
+          {isConverted && <input type="text" placeholder="Nhập tên hãng đối thủ..." className="mt-2 w-full p-2 border rounded-lg text-sm focus:ring-indigo-500" value={competitorBrand} onChange={e => setCompetitorBrand(e.target.value)} />}
+        </div>
+
+        <button onClick={addToCart} disabled={!selectedProductId || !customAmount} className="w-full bg-indigo-50 text-indigo-700 py-3 rounded-xl font-bold hover:bg-indigo-100 disabled:opacity-50 transition-colors">
+          + THÊM VÀO GIỎ
         </button>
       </div>
 
-      {/* 3. LỊCH SỬ HÔM NAY (Có chức năng Xóa/Sửa) */}
-      <div className="space-y-4 pt-4">
-        <h3 className="font-bold text-gray-800">Lịch sử hôm nay</h3>
-        {Object.values(groupedOrders).filter((o:any) => o.created_at.startsWith(todayStr)).length === 0 ? (
-          <p className="text-center text-gray-400 py-6 italic text-sm">Chưa có hóa đơn nào trong ngày.</p>
-        ) : (
-          Object.values(groupedOrders).filter((o:any) => o.created_at.startsWith(todayStr)).map((order: any) => (
-            <div key={order.cart_id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-              <div className="flex justify-between items-center border-b pb-2 mb-2">
-                <div>
-                  <div className="text-[10px] font-mono text-gray-400 uppercase">{order.cart_id}</div>
-                  <div className="text-xs text-gray-500">{new Date(order.created_at).toLocaleTimeString('vi-VN')}</div>
+      {/* HIỂN THỊ GIỎ HÀNG */}
+      {cart.length > 0 && (
+        <div className="bg-white shadow-lg rounded-2xl p-5 border border-gray-100">
+          <ul className="space-y-3 mb-4">
+            {cart.map((item, idx) => (
+              <li key={idx} className="flex justify-between items-center text-sm border-b border-gray-100 pb-3 last:border-0 last:pb-0">
+                <div className="flex flex-col pr-2">
+                  <span className="font-medium text-gray-800">{item.qty}x {item.product_name}</span>
+                  {item.switched_from_brand && <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded w-fit mt-1">Đổi từ: {item.switched_from_brand}</span>}
                 </div>
                 <div className="flex items-center space-x-3">
-                  <span className="font-bold text-indigo-600 text-lg">{new Intl.NumberFormat('vi-VN').format(order.total)}đ</span>
-                  {/* Nút xóa nguyên hóa đơn */}
-                  <button onClick={() => { if(window.confirm('Xóa toàn bộ hóa đơn này?')) deleteCartMutation.mutate(order.cart_id) }} className="text-red-500 bg-red-50 p-1.5 rounded-lg">🗑️</button>
+                  <span className="font-bold text-gray-900">{new Intl.NumberFormat('vi-VN').format(item.net_value)}đ</span>
+                  <button onClick={() => setCart(cart.filter((_, i) => i !== idx))} className="text-red-500 bg-red-50 hover:bg-red-100 w-7 h-7 rounded-md flex items-center justify-center transition-colors">✕</button>
                 </div>
-              </div>
-              
-              <div className="text-xs text-gray-600 space-y-2">
-                {order.items.map((item: any) => (
-                  <div key={item.id} className="flex flex-col bg-gray-50 p-2 rounded-lg">
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="font-medium text-gray-800">• {item.qty}x {item.products?.product_name}</span>
-                      <div className="flex items-center space-x-2">
-                        <span className="font-bold">{new Intl.NumberFormat('vi-VN').format(item.net_value)}đ</span>
-                        {/* Nút sửa / xóa từng món */}
-                        <button onClick={() => { setEditingItem(item); setEditQty(item.qty); setEditAmount(formatNumber(item.net_value.toString())); }} className="text-blue-500">✏️</button>
-                        <button onClick={() => { if(window.confirm('Xóa sản phẩm này khỏi hóa đơn?')) deleteItemMutation.mutate(item.id) }} className="text-red-400">✕</button>
-                      </div>
-                    </div>
-                    {item.switched_from_brand && <span className="text-[9px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-bold w-fit">ĐỔI TỪ: {item.switched_from_brand.toUpperCase()}</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* MODAL SỬA NHANH SẢN PHẨM */}
-      {editingItem && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-2xl">
-            <h3 className="font-bold text-lg mb-4">Sửa sản phẩm</h3>
-            <p className="text-sm text-gray-600 mb-4">{editingItem.products?.product_name}</p>
-            
-            <div className="flex space-x-2 mb-4">
-              <input type="number" min="1" className="w-1/3 p-2.5 border rounded-xl text-center" value={editQty} onChange={e => setEditQty(parseInt(e.target.value)||1)} />
-              <input type="text" className="w-2/3 p-2.5 border rounded-xl text-right font-bold text-indigo-700 bg-indigo-50" value={editAmount} onChange={e => setEditAmount(formatNumber(e.target.value))} />
-            </div>
-
-            <div className="flex space-x-2">
-              <button onClick={() => setEditingItem(null)} className="flex-1 py-2.5 border rounded-xl font-medium text-gray-600">Hủy</button>
-              <button onClick={() => updateItemMutation.mutate()} disabled={updateItemMutation.isPending} className="flex-1 py-2.5 bg-indigo-600 rounded-xl font-bold text-white">Lưu</button>
-            </div>
+              </li>
+            ))}
+          </ul>
+          
+          <div className="border-t border-gray-200 pt-3 flex justify-between items-center font-bold text-lg text-indigo-700">
+            <span>Tổng giỏ hàng:</span>
+            <span className="text-xl">{new Intl.NumberFormat('vi-VN').format(cartTotal)}đ</span>
           </div>
+
+          {/* KHU VỰC HIỂN THỊ QUÀ TẶNG */}
+          {applicableGifts.length > 0 && (
+            <div className="mt-4 p-4 bg-pink-50 rounded-xl border border-pink-200">
+              <h4 className="text-xs font-bold text-pink-700 uppercase mb-3 flex items-center">
+                <span className="mr-2">🎁</span> Quà tặng kèm theo đơn
+              </h4>
+              <ul className="space-y-2">
+                {applicableGifts.map((gift, idx) => (
+                  <li key={idx} className="text-sm text-pink-900 flex justify-between items-start border-b border-pink-100 pb-2 last:border-0 last:pb-0">
+                    <div className="flex flex-col pr-4">
+                      <span className="font-medium">{gift.product_name}</span>
+                      <span className="text-[10px] text-pink-600 mt-0.5">KM: {gift.tier_name}</span>
+                    </div>
+                    <span className="font-bold whitespace-nowrap">x {gift.qty}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <button onClick={() => submitOrderMutation.mutate()} disabled={submitOrderMutation.isPending} className="w-full mt-6 bg-indigo-600 text-white py-3.5 rounded-xl font-bold uppercase tracking-wide shadow-lg shadow-indigo-200 hover:bg-indigo-700 disabled:opacity-50 transition-all active:scale-95">
+            {submitOrderMutation.isPending ? 'Đang xử lý...' : 'XÁC NHẬN LƯU GIỎ HÀNG'}
+          </button>
         </div>
       )}
-
     </div>
   );
 }
