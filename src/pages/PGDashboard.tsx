@@ -160,13 +160,32 @@ export default function PGDashboard() {
   // --- LOGIC QUÉT BILL ---
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanStatus, setScanStatus] = useState('');
 
   const handleScanBill = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setIsScanning(true);
-    toast.info('Đang phân tích hóa đơn...');
+    setScanProgress(5);
+    setScanStatus('Đang tải ảnh lên...');
+    
+    const progressInterval = setInterval(() => {
+      setScanProgress(prev => {
+        if (prev < 30) {
+          setScanStatus('Đang phân tích hình ảnh...');
+          return prev + 5;
+        } else if (prev < 70) {
+          setScanStatus('AI đang đọc dữ liệu...');
+          return prev + 3;
+        } else if (prev < 95) {
+          setScanStatus('Đang trích xuất sản phẩm...');
+          return prev + 1;
+        }
+        return prev;
+      });
+    }, 400);
 
     try {
       const reader = new FileReader();
@@ -177,6 +196,7 @@ export default function PGDashboard() {
       const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
       if (!apiKey || apiKey === "") {
         toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
+        clearInterval(progressInterval);
         setIsScanning(false);
         return;
       }
@@ -208,6 +228,10 @@ export default function PGDashboard() {
           }
         }
       });
+
+      clearInterval(progressInterval);
+      setScanProgress(100);
+      setScanStatus('Hoàn tất!');
 
       const items = JSON.parse(response.text || '[]');
       
@@ -247,10 +271,15 @@ export default function PGDashboard() {
       }
 
     } catch (error: any) {
+      clearInterval(progressInterval);
       console.error('Lỗi quét hóa đơn:', error);
       toast.error('Lỗi khi quét hóa đơn: ' + error.message);
     } finally {
-      setIsScanning(false);
+      setTimeout(() => {
+        setIsScanning(false);
+        setScanProgress(0);
+        setScanStatus('');
+      }, 1000);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
@@ -445,6 +474,21 @@ export default function PGDashboard() {
             className="hidden" 
           />
         </div>
+
+        {isScanning && (
+          <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 animate-pulse">
+            <div className="flex justify-between text-xs font-medium text-purple-800 mb-2">
+              <span>{scanStatus}</span>
+              <span>{scanProgress}%</span>
+            </div>
+            <div className="w-full bg-purple-200 rounded-full h-2.5 overflow-hidden">
+              <div 
+                className="bg-purple-600 h-2.5 rounded-full transition-all duration-300 ease-out" 
+                style={{ width: `${scanProgress}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* HIỂN THỊ GIỎ HÀNG */}
