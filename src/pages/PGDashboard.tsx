@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { GoogleGenAI, Type } from '@google/genai';
+import { Camera } from 'lucide-react';
 
 interface Product {
   product_id: string;
@@ -154,6 +156,98 @@ export default function PGDashboard() {
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.net_value, 0);
+
+  // --- LOGIC QUÉT BILL ---
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isScanning, setIsScanning] = useState(false);
+
+  const handleScanBill = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsScanning(true);
+    toast.info('Đang phân tích hóa đơn...');
+
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      await new Promise((resolve) => (reader.onload = resolve));
+      const base64Data = (reader.result as string).split(',')[1];
+
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-preview',
+        contents: [
+          {
+            inlineData: {
+              data: base64Data,
+              mimeType: file.type,
+            }
+          },
+          "Trích xuất danh sách các sản phẩm có trong hóa đơn này. Trả về mảng JSON chứa 'product_name' (tên sản phẩm), 'qty' (số lượng), 'price' (tổng giá tiền của sản phẩm đó)."
+        ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                product_name: { type: Type.STRING },
+                qty: { type: Type.NUMBER },
+                price: { type: Type.NUMBER }
+              }
+            }
+          }
+        }
+      });
+
+      const items = JSON.parse(response.text || '[]');
+      
+      if (items.length === 0) {
+        toast.error('Không tìm thấy sản phẩm nào trong hóa đơn.');
+        return;
+      }
+
+      let addedCount = 0;
+      const newCartItems: CartItem[] = [];
+
+      items.forEach((item: any) => {
+        // Tìm sản phẩm gần giống nhất trong danh sách products được phép bán
+        const matchedProduct = products.find(p => 
+          item.product_name.toLowerCase().includes(p.product_name.toLowerCase()) ||
+          p.product_name.toLowerCase().includes(item.product_name.toLowerCase())
+        );
+
+        if (matchedProduct) {
+          newCartItems.push({
+            product_id: matchedProduct.product_id,
+            product_name: matchedProduct.product_name,
+            qty: item.qty || 1,
+            net_value: item.price || matchedProduct.value * (item.qty || 1),
+            item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
+            switched_from_brand: null
+          });
+          addedCount++;
+        }
+      });
+
+      if (addedCount > 0) {
+        setCart(prev => [...prev, ...newCartItems]);
+        toast.success(`Đã thêm ${addedCount} sản phẩm từ hóa đơn vào giỏ hàng!`);
+      } else {
+        toast.warning('Đã quét hóa đơn nhưng không có sản phẩm nào khớp với danh mục được phép bán.');
+      }
+
+    } catch (error: any) {
+      console.error('Lỗi quét hóa đơn:', error);
+      toast.error('Lỗi khi quét hóa đơn: ' + error.message);
+    } finally {
+      setIsScanning(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   // --- THUẬT TOÁN TÍNH KHUYẾN MÃI TỰ ĐỘNG ---
   useEffect(() => {
@@ -323,9 +417,28 @@ export default function PGDashboard() {
           {isConverted && <input type="text" placeholder="Nhập tên hãng đối thủ..." className="mt-2 w-full p-2 border rounded-lg text-sm focus:ring-indigo-500" value={competitorBrand} onChange={e => setCompetitorBrand(e.target.value)} />}
         </div>
 
-        <button onClick={addToCart} disabled={!selectedProductId || !customAmount} className="w-full bg-indigo-50 text-indigo-700 py-3 rounded-xl font-bold hover:bg-indigo-100 disabled:opacity-50 transition-colors">
-          + THÊM VÀO GIỎ
-        </button>
+        <div className="flex gap-2">
+          <button onClick={addToCart} disabled={!selectedProductId || !customAmount} className="flex-1 bg-indigo-50 text-indigo-700 py-3 rounded-xl font-bold hover:bg-indigo-100 disabled:opacity-50 transition-colors">
+            + THÊM VÀO GIỎ
+          </button>
+          
+          <button 
+            onClick={() => fileInputRef.current?.click()} 
+            disabled={isScanning || !selectedShopId}
+            className="flex-1 bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+          >
+            <Camera size={20} />
+            {isScanning ? 'ĐANG QUÉT...' : 'QUÉT BILL'}
+          </button>
+          <input 
+            type="file" 
+            accept="image/*" 
+            capture="environment" 
+            ref={fileInputRef} 
+            onChange={handleScanBill} 
+            className="hidden" 
+          />
+        </div>
       </div>
 
       {/* HIỂN THỊ GIỎ HÀNG */}
