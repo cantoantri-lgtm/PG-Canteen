@@ -176,7 +176,7 @@ export default function PGDashboard() {
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        toast.error('Lỗi cấu hình: Không tìm thấy API Key của Google Gemini.');
+        toast.error('Lỗi cấu hình: Không tìm thấy API Key của Google Gemini. Vui lòng thêm GEMINI_API_KEY trong phần Settings > Secrets.');
         setIsScanning(false);
         return;
       }
