@@ -230,7 +230,7 @@ export default function PGDashboard() {
       const ai = new GoogleGenAI({ apiKey });
       
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
+        model: 'gemini-2.5-flash',
         contents: [
           {
             inlineData: {
@@ -322,6 +322,8 @@ export default function PGDashboard() {
       const errorMsg = error.message || '';
       if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
         toast.error('Server đang quá tải. Thử lại sau 5 giây');
+      } else if (errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('quota')) {
+        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút.');
       } else {
         toast.error('Lỗi khi quét hóa đơn: ' + error.message);
       }
