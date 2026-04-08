@@ -46,7 +46,7 @@ export const matchProduct = (extracted_name: string, products: any[], aliases: a
     // Cấu hình Fuse.js hợp lý cho tiếng Việt
     const fuseOptions = {
       includeScore: true,
-      threshold: 0.5, // Ngưỡng 0.5: Loại bỏ các sản phẩm hoàn toàn không liên quan (như Nước ngọt, Đá ly)
+      threshold: 0.65, // Tăng ngưỡng lên 0.65 để bắt được nhiều kết quả hơn (Gemini đã lọc rác)
       keys: ['search_term'],
       ignoreLocation: true, // Tìm kiếm ở bất kỳ vị trí nào trong chuỗi
       useExtendedSearch: true,
@@ -61,15 +61,15 @@ export const matchProduct = (extracted_name: string, products: any[], aliases: a
       const bestMatch = searchResult[0];
       
       // Phân tích điểm (Score của Fuse.js: 0 là khớp hoàn toàn, 1 là không khớp)
-      // Điểm <= 0.15 tương đương độ khớp >= 85%
-      if (bestMatch.score !== undefined && bestMatch.score <= 0.15) {
+      // Điểm <= 0.2 tương đương độ khớp >= 80%
+      if (bestMatch.score !== undefined && bestMatch.score <= 0.2) {
         return {
           matchType: 'fuzzy_high',
           product_id: bestMatch.item.product_id,
           suggestions: []
         };
       } else {
-        // Nếu độ khớp < 85%, trả về danh sách Top 10 sản phẩm có điểm số cao nhất (gần đúng nhất)
+        // Nếu độ khớp < 80%, trả về danh sách Top 10 sản phẩm có điểm số cao nhất (gần đúng nhất)
         // Lọc bỏ các product_id trùng lặp để suggestions đa dạng
         const uniqueProductIds = Array.from(
           new Set(searchResult.map(r => r.item.product_id))

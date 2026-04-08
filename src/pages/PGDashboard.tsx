@@ -229,6 +229,14 @@ export default function PGDashboard() {
       }
       const ai = new GoogleGenAI({ apiKey });
       
+      const productNamesList = products.map(p => p.product_name).join('\n');
+      const promptText = `Trích xuất danh sách các sản phẩm có trong hóa đơn này. 
+CHÚ Ý QUAN TRỌNG: Chỉ trích xuất các sản phẩm có khả năng thuộc danh mục sản phẩm của công ty (ví dụ: Băng vệ sinh, tã, bỉm, giấy ướt, bông tẩy trang...). Bỏ qua hoàn toàn các sản phẩm không liên quan (như nước ngọt, đồ ăn, thức uống, phí dịch vụ...).
+Danh sách sản phẩm công ty đang bán để tham khảo:
+${productNamesList}
+
+Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn), 'qty' (số lượng), 'price' (tổng giá tiền của sản phẩm đó).`;
+
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: [
@@ -238,7 +246,7 @@ export default function PGDashboard() {
               mimeType: file.type,
             }
           },
-          "Trích xuất danh sách các sản phẩm có trong hóa đơn này. Trả về mảng JSON chứa 'product_name' (tên sản phẩm), 'qty' (số lượng), 'price' (tổng giá tiền của sản phẩm đó)."
+          promptText
         ],
         config: {
           responseMimeType: "application/json",
