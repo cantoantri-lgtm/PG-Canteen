@@ -143,6 +143,25 @@ export default function PGDashboard() {
     }
   });
 
+  // 5. Lấy tồn kho hiện tại của cửa hàng
+  const { data: inventoryData = [] } = useQuery({
+    queryKey: ['shop_inventory', selectedShopId],
+    queryFn: async () => {
+      if (!selectedShopId) return [];
+      // Assuming inventory is tracked per shop. If it's tracked globally, remove the eq('shop_id')
+      // If there's no shop_id in inventories, we might need to adjust this logic based on actual schema
+      const { data, error } = await supabase
+        .from('inventories')
+        .select('product_id, quantity');
+      if (error) {
+        console.error('Lỗi tải tồn kho:', error);
+        return [];
+      }
+      return data;
+    },
+    enabled: !!selectedShopId,
+  });
+
   // --- USE EFFECTS LÀM MƯỢT FORM ---
   
   // Tự động chọn cửa hàng nếu PG chỉ có 1 lịch
@@ -617,21 +636,40 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
 
           {/* KHU VỰC HIỂN THỊ QUÀ TẶNG */}
           {applicableGifts.length > 0 && (
-            <div className="mt-4 p-4 bg-pink-50 rounded-xl border border-pink-200">
-              <h4 className="text-xs font-bold text-pink-700 uppercase mb-3 flex items-center">
-                <span className="mr-2">🎁</span> Quà tặng kèm theo đơn
-              </h4>
-              <ul className="space-y-2">
-                {applicableGifts.map((gift, idx) => (
-                  <li key={idx} className="text-sm text-pink-900 flex justify-between items-start border-b border-pink-100 pb-2 last:border-0 last:pb-0">
-                    <div className="flex flex-col pr-4">
-                      <span className="font-medium">{gift.product_name}</span>
-                      <span className="text-[10px] text-pink-600 mt-0.5">KM: {gift.tier_name}</span>
+            <div className="mt-4 space-y-3">
+              {applicableGifts.map((gift, idx) => {
+                const inventoryItem = inventoryData.find((i: any) => i.product_id === gift.product_id);
+                const stockQty = inventoryItem ? inventoryItem.quantity : 0;
+                
+                return (
+                  <div key={idx} className="p-4 bg-pink-50 rounded-xl border border-pink-200">
+                    {/* DÒNG 1: Tiêu đề & Tồn kho ngang hàng */}
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="text-xs font-bold text-pink-700 uppercase flex items-center m-0">
+                        <span className="mr-1.5 text-base">🎁</span> Quà tặng kèm theo đơn
+                      </h4>
+                      <span className="text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded px-2 py-0.5 shadow-sm">
+                        Tồn: {stockQty}
+                      </span>
                     </div>
-                    <span className="font-bold whitespace-nowrap">x {gift.qty}</span>
-                  </li>
-                ))}
-              </ul>
+                    
+                    {/* DÒNG 2: Tên quà tặng & Số lượng tặng ngang hàng */}
+                    <div className="flex justify-between items-start mb-1.5">
+                      <span className="font-bold text-pink-900 text-sm pr-4 leading-tight">
+                        {gift.product_name}
+                      </span>
+                      <span className="font-extrabold text-pink-700 text-base whitespace-nowrap">
+                        x {gift.qty}
+                      </span>
+                    </div>
+                    
+                    {/* DÒNG 3: Chi tiết chương trình khuyến mãi */}
+                    <div className="text-[11px] text-pink-600 leading-snug">
+                      KM: {gift.tier_name}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
