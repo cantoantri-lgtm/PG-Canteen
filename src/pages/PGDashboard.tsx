@@ -99,6 +99,20 @@ export default function PGDashboard() {
     enabled: !!user?.id && !!selectedShopId,
   });
 
+  // 2.5 Lấy danh sách Product Aliases (Lưu vào RAM, làm mới mỗi 1 tiếng)
+  const { data: productAliases = [] } = useQuery({
+    queryKey: ['product_aliases'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('product_aliases').select('*');
+      if (error) {
+        console.error('Lỗi tải product aliases:', error);
+        return [];
+      }
+      return data;
+    },
+    staleTime: 1000 * 60 * 60, // 1 tiếng
+  });
+
   // 3. Lấy Doanh số hôm nay (Từ SQL View)
   const { data: todaySales = 0 } = useQuery({
     queryKey: ['todaySales', user?.id],
@@ -258,8 +272,8 @@ export default function PGDashboard() {
       const newPendingItems: PendingOcrItem[] = [];
 
       for (const item of items) {
-        // Sử dụng logic matchProduct (Self-learning OCR)
-        const matchResult = await matchProduct(item.product_name, products);
+        // Sử dụng logic matchProduct (Self-learning OCR) với dữ liệu RAM
+        const matchResult = matchProduct(item.product_name, products, productAliases);
 
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
           const matchedProduct = products.find(p => p.product_id === matchResult.product_id);
@@ -274,8 +288,8 @@ export default function PGDashboard() {
             });
             autoAddedCount++;
           }
-        } else {
-          // Cần PG xác nhận thủ công
+        } else if (matchResult.matchType === 'fuzzy_low' && matchResult.suggestions.length > 0) {
+          // Cần PG xác nhận thủ công (chỉ khi có suggestions)
           newPendingItems.push({
             original_name: item.product_name,
             qty: item.qty || 1,
@@ -283,6 +297,9 @@ export default function PGDashboard() {
             suggestions: matchResult.suggestions,
             selected_product_id: matchResult.suggestions[0]?.product_id || ''
           });
+        } else {
+          // matchType === 'none' -> Bỏ qua hoàn toàn vì là sản phẩm rác/không bán
+          console.log('Đã bỏ qua sản phẩm không liên quan:', item.product_name);
         }
       }
 
@@ -648,16 +665,9 @@ export default function PGDashboard() {
                     }}
                   >
                     <option value="">-- Bỏ qua sản phẩm này --</option>
-                    <optgroup label="Gợi ý tốt nhất">
-                      {item.suggestions.map((s: any) => (
-                        <option key={`sugg-${s.product_id}`} value={s.product_id}>⭐ {s.product_name}</option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Tất cả sản phẩm">
-                      {products.map((p: any) => (
-                        <option key={`all-${p.product_id}`} value={p.product_id}>{p.product_name}</option>
-                      ))}
-                    </optgroup>
+                    {item.suggestions.map((s: any) => (
+                      <option key={`sugg-${s.product_id}`} value={s.product_id}>⭐ {s.product_name}</option>
+                    ))}
                   </select>
                 </div>
               ))}
