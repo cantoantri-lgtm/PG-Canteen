@@ -301,7 +301,13 @@ export default function PGDashboard() {
     } catch (error: any) {
       clearInterval(progressInterval);
       console.error('Lỗi quét hóa đơn:', error);
-      toast.error('Lỗi khi quét hóa đơn: ' + error.message);
+      
+      const errorMsg = error.message || '';
+      if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
+        toast.error('Server đang quá tải. Thử lại sau 5 giây');
+      } else {
+        toast.error('Lỗi khi quét hóa đơn: ' + error.message);
+      }
     } finally {
       setTimeout(() => {
         setIsScanning(false);
@@ -535,22 +541,29 @@ export default function PGDashboard() {
             className="hidden" 
           />
         </div>
+      </div>
 
-        {isScanning && (
-          <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 animate-pulse">
-            <div className="flex justify-between text-xs font-medium text-purple-800 mb-2">
+      {/* MODAL TIẾN TRÌNH QUÉT BILL */}
+      {isScanning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col items-center text-center">
+            <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mb-4">
+              <Camera size={32} className="animate-pulse" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Đang xử lý hóa đơn</h3>
+            <div className="w-full flex justify-between text-sm font-medium text-purple-800 mb-2">
               <span>{scanStatus}</span>
               <span>{scanProgress}%</span>
             </div>
-            <div className="w-full bg-purple-200 rounded-full h-2.5 overflow-hidden">
+            <div className="w-full bg-purple-100 rounded-full h-3 overflow-hidden">
               <div 
-                className="bg-purple-600 h-2.5 rounded-full transition-all duration-300 ease-out" 
+                className="bg-purple-600 h-3 rounded-full transition-all duration-300 ease-out" 
                 style={{ width: `${scanProgress}%` }}
               ></div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* HIỂN THỊ GIỎ HÀNG */}
       {cart.length > 0 && (
