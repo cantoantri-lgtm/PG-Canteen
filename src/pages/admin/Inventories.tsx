@@ -25,6 +25,7 @@ export default function Inventories() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSupFilter, setSelectedSupFilter] = useState('');
   const [selectedProductFilter, setSelectedProductFilter] = useState('');
+  const [selectedModalBrand, setSelectedModalBrand] = useState('');
 
   const { data: profiles = [] } = useQuery({
     queryKey: ['profiles'],
@@ -39,6 +40,15 @@ export default function Inventories() {
     queryKey: ['products'],
     queryFn: async () => {
       const { data, error } = await supabase.from('products').select('*').order('product_name');
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  const { data: brands = [] } = useQuery({
+    queryKey: ['brands'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('brands').select('*').order('brand_name');
       if (error) throw error;
       return data;
     }
@@ -113,12 +123,22 @@ export default function Inventories() {
   const handleAdd = () => {
     setIsAdding(true);
     setEditForm({ quantity: 0 });
+    setSelectedModalBrand('');
     setIsModalOpen(true);
   };
 
   const handleEdit = (inventory: Inventory) => {
     setIsAdding(false);
     setEditForm(inventory);
+    
+    // Find the brand of the product being edited
+    const product = products.find((p: any) => p.product_id === inventory.product_id);
+    if (product) {
+      setSelectedModalBrand(product.brand_id || '');
+    } else {
+      setSelectedModalBrand('');
+    }
+    
     setIsModalOpen(true);
   };
 
@@ -258,6 +278,22 @@ export default function Inventories() {
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700">Nhãn hàng</label>
+            <select
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+              value={selectedModalBrand}
+              onChange={e => {
+                setSelectedModalBrand(e.target.value);
+                setEditForm({...editForm, product_id: ''}); // Reset product when brand changes
+              }}
+            >
+              <option value="">-- Tất cả nhãn hàng --</option>
+              {brands.map((b: any) => (
+                <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700">Sản phẩm</label>
             <select
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
@@ -265,7 +301,9 @@ export default function Inventories() {
               onChange={e => setEditForm({...editForm, product_id: e.target.value})}
             >
               <option value="">Chọn Sản phẩm</option>
-              {products.map((p: any) => (
+              {products
+                .filter((p: any) => selectedModalBrand === '' || p.brand_id === selectedModalBrand)
+                .map((p: any) => (
                 <option key={p.product_id} value={p.product_id}>{p.product_name}</option>
               ))}
             </select>

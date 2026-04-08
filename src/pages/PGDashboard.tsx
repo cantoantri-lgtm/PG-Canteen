@@ -330,6 +330,8 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
       const errorMsg = error.message || '';
       if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
         toast.error('Server đang quá tải. Thử lại sau 5 giây');
+      } else if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút');
       } else {
         toast.error('Lỗi khi quét hóa đơn: ' + error.message);
       }
