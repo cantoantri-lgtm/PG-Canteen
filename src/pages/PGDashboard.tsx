@@ -63,6 +63,13 @@ export default function PGDashboard() {
   // State cho OCR Learning
   const [pendingOcrItems, setPendingOcrItems] = useState<PendingOcrItem[]>([]);
   const [showOcrModal, setShowOcrModal] = useState(false);
+  
+  // State cho Manual Selection trong OCR
+  const [manualSelectIndex, setManualSelectIndex] = useState<number | null>(null);
+  const [manualCategory, setManualCategory] = useState('');
+  const [manualBrand, setManualBrand] = useState('');
+  const [manualProductGroup, setManualProductGroup] = useState('');
+  const [manualProductId, setManualProductId] = useState('');
 
   // Lấy chuỗi ngày YYYY-MM-DD theo giờ địa phương
   const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0];
@@ -264,6 +271,21 @@ export default function PGDashboard() {
 
   const uniqueProductGroupNames = Array.from(new Set(filteredProducts.map(p => p.product_group_name).filter(Boolean) as string[]));
   const availableProducts = filteredProducts.filter(p => p.product_group_name === selectedProductGroupName);
+
+  // --- LOGIC FORM CHỌN THỦ CÔNG (OCR) ---
+  const manualAvailableBrands = manualCategory 
+    ? products.filter(p => p.category_name === manualCategory)
+    : products;
+  const manualUniqueBrands = Array.from(new Set(manualAvailableBrands.map(p => p.brand_name).filter(Boolean) as string[]));
+  
+  const manualFilteredProducts = products.filter(p => {
+    if (manualBrand && p.brand_name !== manualBrand) return false;
+    if (manualCategory && p.category_name !== manualCategory) return false;
+    return true;
+  });
+
+  const manualUniqueProductGroupNames = Array.from(new Set(manualFilteredProducts.map(p => p.product_group_name).filter(Boolean) as string[]));
+  const manualAvailableProducts = manualFilteredProducts.filter(p => p.product_group_name === manualProductGroup);
 
   // Tự động chọn chi tiết sản phẩm nếu chỉ có 1 lựa chọn
   useEffect(() => {
@@ -627,20 +649,34 @@ export default function PGDashboard() {
                   </div>
                   
                   <label className="block mt-3 text-xs font-semibold text-gray-700 mb-1">Chọn sản phẩm đúng:</label>
-                  <select 
-                    className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500"
-                    value={item.selected_product_id}
-                    onChange={(e) => {
-                      const newItems = [...pendingOcrItems];
-                      newItems[idx].selected_product_id = e.target.value;
-                      setPendingOcrItems(newItems);
-                    }}
-                  >
-                    <option value="">-- Bỏ qua sản phẩm này --</option>
-                    {item.suggestions.map((s: any) => (
-                      <option key={`sugg-${s.product_id}`} value={s.product_id}>⭐ {s.product_name}</option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      className="flex-1 p-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500"
+                      value={item.selected_product_id}
+                      onChange={(e) => {
+                        const newItems = [...pendingOcrItems];
+                        newItems[idx].selected_product_id = e.target.value;
+                        setPendingOcrItems(newItems);
+                      }}
+                    >
+                      <option value="">-- Bỏ qua sản phẩm này --</option>
+                      {item.suggestions.map((s: any) => (
+                        <option key={`sugg-${s.product_id}`} value={s.product_id}>⭐ {s.product_name}</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={() => {
+                        setManualSelectIndex(idx);
+                        setManualCategory('');
+                        setManualBrand('');
+                        setManualProductGroup('');
+                        setManualProductId('');
+                      }}
+                      className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-200 transition-colors whitespace-nowrap"
+                    >
+                      Tìm khác...
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -660,6 +696,80 @@ export default function PGDashboard() {
                 className="flex-[2] py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-colors shadow-md shadow-indigo-200"
               >
                 Xác nhận & Thêm vào giỏ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL TÌM SẢN PHẨM THỦ CÔNG */}
+      {manualSelectIndex !== null && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-4 border-b border-gray-100 bg-indigo-50/50 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-indigo-900">Tìm sản phẩm</h3>
+              <button onClick={() => setManualSelectIndex(null)} className="text-gray-500 hover:text-gray-700"><X className="w-5 h-5" /></button>
+            </div>
+            
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-4">
+                <span className="text-xs font-semibold text-gray-500 uppercase">Đang tìm cho:</span>
+                <p className="font-medium text-gray-900">{pendingOcrItems[manualSelectIndex]?.original_name}</p>
+              </div>
+
+              <div className="space-y-3">
+                <select className="w-full p-2.5 border rounded-xl" value={manualCategory} onChange={e => {setManualCategory(e.target.value); setManualProductGroup(''); setManualProductId('');}}>
+                  <option value="">-- Lọc Ngành hàng --</option>
+                  {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select className="w-full p-2.5 border rounded-xl" value={manualBrand} onChange={e => {setManualBrand(e.target.value); setManualProductGroup(''); setManualProductId('');}}>
+                  <option value="">-- Lọc Hãng --</option>
+                  {manualUniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+                <select className="w-full p-2.5 border rounded-xl" value={manualProductGroup} onChange={e => {setManualProductGroup(e.target.value); setManualProductId('');}}>
+                  <option value="" disabled>Chọn Nhóm SP...</option>
+                  {manualUniqueProductGroupNames.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <select className="w-full p-2.5 border rounded-xl" value={manualProductId} onChange={e => setManualProductId(e.target.value)}>
+                  <option value="" disabled>Chọn Sản phẩm...</option>
+                  {manualAvailableProducts.map(p => (
+                    <option key={p.product_id} value={p.product_id}>{p.product_name || 'Mặc định'}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-gray-100 flex gap-3 bg-white">
+              <button 
+                onClick={() => setManualSelectIndex(null)}
+                className="flex-1 py-2.5 rounded-xl font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors"
+              >
+                Hủy
+              </button>
+              <button 
+                disabled={!manualProductId}
+                onClick={() => {
+                  const newItems = [...pendingOcrItems];
+                  const selectedProduct = products.find(p => p.product_id === manualProductId);
+                  if (selectedProduct) {
+                    // Thêm sản phẩm vừa chọn vào đầu danh sách suggestions nếu chưa có
+                    const existingSuggIndex = newItems[manualSelectIndex].suggestions.findIndex((s: any) => s.product_id === manualProductId);
+                    if (existingSuggIndex === -1) {
+                      newItems[manualSelectIndex].suggestions.unshift({
+                        product_id: selectedProduct.product_id,
+                        product_name: selectedProduct.product_name,
+                        product_group_name: selectedProduct.product_group_name,
+                        value: selectedProduct.value
+                      });
+                    }
+                    newItems[manualSelectIndex].selected_product_id = manualProductId;
+                    setPendingOcrItems(newItems);
+                  }
+                  setManualSelectIndex(null);
+                }}
+                className="flex-[2] py-2.5 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-md shadow-indigo-200"
+              >
+                Chọn sản phẩm này
               </button>
             </div>
           </div>
