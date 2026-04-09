@@ -80,7 +80,13 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       const base64Data = (reader.result as string).split(',')[1];
 
       // API Key Configuration
-      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
+      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        toast.error('Lỗi cấu hình: Không tìm thấy API Key.');
+        clearInterval(progressInterval);
+        setIsScanning(false);
+        return;
+      }
       const ai = new GoogleGenAI({ apiKey });
       
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
@@ -93,7 +99,7 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
 
       const response = await ai.models.generateContent({
         model: 'gemini-1.5-flash',
-        contents: [{ inlineData: { data: base64Data, mimeType: file.type } }, promptText],
+        contents: [{ inlineData: { data: base64Data, mimeType: file.type || 'image/jpeg' } }, promptText],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -110,7 +116,18 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
         }
       });
 
-      const items = JSON.parse(response.text || '[]');
+      const responseText = response.text || '[]';
+      let items = [];
+      try {
+        items = JSON.parse(responseText);
+        if (!Array.isArray(items)) {
+          items = [];
+        }
+      } catch (e) {
+        console.error("JSON parse error:", e, "Response text:", responseText);
+        items = [];
+      }
+
       const newCartItems: CartItem[] = [];
       const newPendingItems: PendingOcrItem[] = [];
 
@@ -205,10 +222,21 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       setScanStatus('Hoàn tất!');
       setTimeout(() => setIsScanning(false), 500);
 
-    } catch (error) {
+    } catch (error: any) {
+      console.error("Scan error:", error);
       clearInterval(progressInterval);
       setIsScanning(false);
-      toast.error('Lỗi quét hóa đơn. Vui lòng thử lại.');
+      
+      const errorMsg = error?.message || String(error) || '';
+      if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
+        toast.error('Server đang quá tải. Thử lại sau 5 giây');
+      } else if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
+        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút');
+      } else if (errorMsg.includes('API key not valid') || errorMsg.includes('API_KEY_INVALID')) {
+        toast.error('Lỗi API Key không hợp lệ. Vui lòng kiểm tra lại cấu hình.');
+      } else {
+        toast.error(`Lỗi quét hóa đơn: ${errorMsg.substring(0, 50)}... Vui lòng thử lại.`);
+      }
     }
   };
 
