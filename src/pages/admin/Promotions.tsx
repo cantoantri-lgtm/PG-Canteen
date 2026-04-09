@@ -46,6 +46,8 @@ interface Promotion {
   channel_id: string;
   account_id: string;
   shop_id: string;
+  start_date?: string;
+  end_date?: string;
   programs?: { program_name: string, start_date?: string, end_date?: string };
   channels?: { channel_name: string };
   accounts?: { account_name: string };
