@@ -27,7 +27,7 @@ interface CartItem {
 interface PendingOcrItem {
   original_name: string;
   qty: number;
-  price: number;
+  price: number; // Lưu ý: Ở component cha, price này sẽ đại diện cho đơn giá (unit_price) để PG dễ nhìn
   suggestions: any[];
   selected_product_id?: string;
 }
@@ -88,10 +88,28 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
       const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang...';
       
-      const promptText = `Bạn là hệ thống trích xuất dữ liệu hóa đơn.
-Trích xuất toàn bộ các mặt hàng trên hóa đơn này có khả năng thuộc các NHÓM NGÀNH HÀNG sau: [${categoryList}].
-TUYỆT ĐỐI BỎ QUA các sản phẩm không thuộc các nhóm trên (ví dụ: thực phẩm, đồ uống, hóa mỹ phẩm khác).
-Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa đơn), 'qty', 'price'.`;
+      // Cập nhật Prompt tối ưu hóa cho việc bóc tách ĐƠN GIÁ (unit_price)
+      const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị và cửa hàng tiện lợi.
+
+NHIỆM VỤ: 
+Trích xuất danh sách các mặt hàng có mặt trên hóa đơn thuộc các NHÓM NGÀNH HÀNG sau: [${categoryList}].
+
+ĐIỀU KIỆN LOẠI TRỪ (QUAN TRỌNG): 
+Tuyệt đối BỎ QUA tất cả các sản phẩm là thực phẩm, đồ ăn, đồ uống hoặc hóa mỹ phẩm không liên quan.
+
+HƯỚNG DẪN BÓC TÁCH GIÁ (CRITICAL):
+Tên sản phẩm cùng loại trên hóa đơn thường in giống hệt nhau. Do đó, ĐƠN GIÁ (Unit Price) là yếu tố sống còn để hệ thống phân loại phân khúc sản phẩm.
+Cấu trúc hóa đơn thường hiển thị theo cặp dòng: 
+- Dòng trên: [Tên Sản Phẩm]
+- Dòng dưới: [Số lượng]      [Đơn giá]      [Thành tiền]
+
+Ví dụ minh họa từ hóa đơn thực tế:
+"BVS Diana Băng Quần Size (L-XL/2m)"
+"2,00      45.000      90.000"
+-> Bạn phải lấy ĐƠN GIÁ (unit_price) là 45000 (tuyệt đối không lấy giá thành tiền 90000).
+
+ĐỊNH DẠNG ĐẦU RA:
+Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), và 'unit_price' (đơn giá của 1 sản phẩm).`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -113,7 +131,7 @@ Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa
               properties: {
                 raw_name: { type: Type.STRING },
                 qty: { type: Type.NUMBER },
-                price: { type: Type.NUMBER }
+                unit_price: { type: Type.NUMBER } // Yêu cầu AI trả về chuẩn Đơn giá
               }
             }
           }
@@ -127,7 +145,7 @@ Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa
       const items = JSON.parse(response.text || '[]');
       
       if (items.length === 0) {
-        toast.error('Không tìm thấy sản phẩm nào trong hóa đơn.');
+        toast.error('Không tìm thấy sản phẩm mục tiêu nào trong hóa đơn.');
         setIsScanning(false);
         return;
       }
@@ -136,8 +154,8 @@ Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa
       const newPendingItems: PendingOcrItem[] = [];
 
       for (const item of items) {
-        // Sử dụng logic matchProduct (Self-learning OCR) với dữ liệu RAM
-        const matchResult = matchProduct(item.raw_name, products, productAliases);
+        // Gọi hàm matchProduct ĐÃ CẬP NHẬT: Truyền thêm item.unit_price vào để tính điểm
+        const matchResult = matchProduct(item.raw_name, item.unit_price, products, productAliases);
 
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
           const matchedProduct = products.find(p => p.product_id === matchResult.product_id);
@@ -147,7 +165,8 @@ Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa
               product_name: matchedProduct.product_name,
               product_group_name: matchedProduct.product_group_name,
               qty: item.qty || 1,
-              net_value: item.price || matchedProduct.value * (item.qty || 1),
+              // net_value (Thành tiền) = Đơn giá trên bill (hoặc DB nếu thiếu) * số lượng
+              net_value: (item.unit_price || matchedProduct.value) * (item.qty || 1), 
               item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
               switched_from_brand: null
             });
@@ -157,13 +176,13 @@ Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa
           newPendingItems.push({
             original_name: item.raw_name,
             qty: item.qty || 1,
-            price: item.price || 0,
+            price: item.unit_price || 0, // Đưa đơn giá ra giao diện cho PG kiểm tra
             suggestions: matchResult.suggestions,
             selected_product_id: matchResult.suggestions[0]?.product_id || ''
           });
         } else {
-          // matchType === 'none' -> Bỏ qua hoàn toàn vì là sản phẩm rác/không bán
-          console.log('Đã bỏ qua sản phẩm không liên quan:', item.raw_name);
+          // matchType === 'none' -> Bỏ qua hoàn toàn
+          console.log('Đã bỏ qua sản phẩm không liên quan / sai giá quá xa:', item.raw_name);
         }
       }
 
