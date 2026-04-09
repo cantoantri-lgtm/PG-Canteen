@@ -175,7 +175,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
           // SỬA LỖI 2 & 3: Xử lý mọi trường hợp còn lại (fuzzy_low, none) thay vì bỏ qua
           let suggestions = matchResult.suggestions || [];
 
-          // Nếu hàm matchProduct trả về mảng rỗng, tự động tính toán Top 5 dựa trên tên và giá
+          // Nếu hàm matchProduct trả về mảng rỗng, tự động tính toán Top 10 dựa trên tên và giá
           if (suggestions.length === 0) {
             const rawWords = item.raw_name.toLowerCase().split(/[ \-\+]+/); // Cắt chuỗi thành các từ
             
@@ -195,10 +195,10 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
               return { ...p, score };
             });
 
-            // Lấy ra Top 5 sản phẩm có điểm số cao nhất
+            // Lấy ra Top 10 sản phẩm có điểm số cao nhất
             suggestions = scoredProducts
               .sort((a, b) => b.score - a.score)
-              .slice(0, 5)
+              .slice(0, 10)
               .map(p => ({
                 product_id: p.product_id,
                 product_name: p.product_name,
@@ -206,8 +206,8 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
                 value: p.value
               }));
           } else {
-            // Đảm bảo suggestions trả về từ hàm chỉ lấy tối đa 5
-            suggestions = suggestions.slice(0, 5);
+            // Đảm bảo suggestions trả về từ hàm lấy tối đa 10
+            suggestions = suggestions.slice(0, 10);
           }
 
           // Đẩy vào danh sách Pending để PG kiểm tra thủ công
