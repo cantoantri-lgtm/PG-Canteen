@@ -39,15 +39,6 @@ interface ScanbillProps {
   disabled?: boolean;
 }
 
-// Hàm hỗ trợ: Xóa dấu tiếng Việt để so sánh chuỗi chính xác hơn
-const removeAccents = (str: string) => {
-  return str
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D');
-};
-
 export default function Scanbill({ products, productAliases, onScanComplete, disabled }: ScanbillProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -86,7 +77,7 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
 
       const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
       if (!apiKey || apiKey === "") {
-        toast.error('Lỗi cấu hình: Không tìm thấy API Key.');
+        toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
         clearInterval(progressInterval);
         setIsScanning(false);
         return;
@@ -96,6 +87,7 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
       const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang';
       
+      // SỬA LỖI 1: Tinh chỉnh lại Prompt, loại bỏ các từ cấm đoán quá mạnh, thêm ví dụ thực tế.
       const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
 
 NHIỆM VỤ: 
@@ -117,7 +109,7 @@ Ví dụ:
 Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), và 'unit_price' (đơn giá).`;
 
       const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3-flash-preview',
         contents: [
           {
             inlineData: {
@@ -161,7 +153,6 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       for (const item of items) {
         const matchResult = matchProduct(item.raw_name, item.unit_price, products, productAliases);
 
-        // Chỉ đưa thẳng vào giỏ hàng nếu thuật toán tự tin tuyệt đối
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
           const matchedProduct = products.find(p => p.product_id === matchResult.product_id);
           if (matchedProduct) {
@@ -176,63 +167,51 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
             });
           }
         } else {
-          // THUẬT TOÁN ĐỀ XUẤT (FALLBACK) THÔNG MINH
-          const rawNameNorm = removeAccents(item.raw_name.toLowerCase());
-          const rawWords = rawNameNorm.split(/[ \-\+]+/);
-          const itemUnitPrice = item.unit_price || 0;
+          // SỬA LỖI 2 & 3: Xử lý mọi trường hợp còn lại (fuzzy_low, none) thay vì bỏ qua
+          let suggestions = matchResult.suggestions || [];
 
-          const scoredProducts = products.map(p => {
-            let score = 0;
-            const pNameNorm = removeAccents(p.product_name.toLowerCase());
+          // Nếu hàm matchProduct trả về mảng rỗng, tự động tính toán Top 5 dựa trên tên và giá
+          if (suggestions.length === 0) {
+            const rawWords = item.raw_name.toLowerCase().split(/[ \-\+]+/); // Cắt chuỗi thành các từ
+            
+            const scoredProducts = products.map(p => {
+              let score = 0;
+              const pName = p.product_name.toLowerCase();
+              
+              // 1. Cộng điểm nếu trùng từ khóa (ưu tiên từ khóa dài > 2 ký tự)
+              rawWords.forEach(word => {
+                if (word.length > 2 && pName.includes(word)) score += 15;
+              });
 
-            // 1. Chấm điểm từ khóa không dấu (bvs, quan, comfy...)
-            rawWords.forEach(word => {
-              if (word.length >= 2 && pNameNorm.includes(word)) {
-                score += 20; 
-              }
+              // 2. Trừ điểm nếu lệch giá (Càng lệch giá càng bị trừ nhiều điểm)
+              const priceDiff = Math.abs(p.value - (item.unit_price || 0));
+              score -= (priceDiff / 5000); // Ví dụ: lệch 5k bị trừ 1 điểm
+
+              return { ...p, score };
             });
 
-            // 2. Chấm điểm giá: Xử lý khác biệt giữa Giá Gói và Giá Miếng
-            if (p.value > 0 && itemUnitPrice > 0) {
-              const ratio = itemUnitPrice / p.value;
-              const nearestInt = Math.round(ratio); 
-              
-              // Nếu bill đang quét giá Lốc/Gói (VD: 44k / 22k = 2) -> Sai số dưới 10%
-              if (nearestInt >= 1 && nearestInt <= 100 && Math.abs(ratio - nearestInt) < 0.1) {
-                score += 15; // Thưởng điểm vì chắc chắn khớp đóng gói (1 gói 2 miếng, 4 miếng...)
-              } else {
-                // Trừ điểm nếu lệch giá quá xa và không theo quy luật
-                const priceDiff = Math.abs(p.value - itemUnitPrice);
-                score -= Math.min(15, priceDiff / 3000); 
-              }
-            }
-
-            return { ...p, score };
-          });
-
-          // Lọc ra Top 5 sản phẩm liên quan nhất
-          let bestSuggestions = scoredProducts
-            .filter(p => p.score > 0)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 5)
-            .map(p => ({
-              product_id: p.product_id,
-              product_name: p.product_name,
-              product_group_name: p.product_group_name,
-              value: p.value
-            }));
-
-          // Nếu thuật toán mới không tìm ra gì, mới dùng gợi ý của hàm matchProduct cũ
-          if (bestSuggestions.length === 0 && matchResult.suggestions && matchResult.suggestions.length > 0) {
-             bestSuggestions = matchResult.suggestions.slice(0, 5);
+            // Lấy ra Top 5 sản phẩm có điểm số cao nhất
+            suggestions = scoredProducts
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 5)
+              .map(p => ({
+                product_id: p.product_id,
+                product_name: p.product_name,
+                product_group_name: p.product_group_name,
+                value: p.value
+              }));
+          } else {
+            // Đảm bảo suggestions trả về từ hàm chỉ lấy tối đa 5
+            suggestions = suggestions.slice(0, 5);
           }
 
+          // Đẩy vào danh sách Pending để PG kiểm tra thủ công
           newPendingItems.push({
             original_name: item.raw_name,
             qty: item.qty || 1,
-            price: itemUnitPrice,
-            suggestions: bestSuggestions,
-            selected_product_id: bestSuggestions[0]?.product_id || ''
+            price: item.unit_price || 0,
+            suggestions: suggestions,
+            selected_product_id: suggestions[0]?.product_id || ''
           });
         }
       }
@@ -251,9 +230,9 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       
       const errorMsg = error.message || '';
       if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
-        toast.error('Server đang quá tải. Thử lại sau 5 giây');
+        toast.error('Server đang quá tải. Thử lại sau 5 giây', { duration: 5000 });
       } else if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút');
+        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút', { duration: 5000 });
       } else {
         toast.error('Lỗi khi quét hóa đơn. Vui lòng thử lại.');
       }
