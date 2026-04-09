@@ -10,6 +10,13 @@ import Fuse from 'fuse.js';
  */
 export const matchProduct = (extracted_name: string, unit_price: number, products: any[], aliases: any[]) => {
   try {
+    if (!extracted_name) {
+      return {
+        matchType: 'none',
+        product_id: null,
+        suggestions: []
+      };
+    }
     const normalizedExtractedName = extracted_name.trim().toLowerCase();
     const billPrice = unit_price || 0;
 

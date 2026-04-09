@@ -696,15 +696,15 @@ export default function AdminDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.kpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center justify-center space-x-1">
-                          {pg.achievement >= data.standardProgressPercent && (
+                          {pg.achievement >= (data as any).standardProgressPercent && (
                             <CheckCircle2 className="w-4 h-4 text-green-600" />
                           )}
-                          <span className={`text-sm font-bold ${pg.achievement >= data.standardProgressPercent ? 'text-green-600' : 'text-red-500'}`}>
+                          <span className={`text-sm font-bold ${pg.achievement >= (data as any).standardProgressPercent ? 'text-green-600' : 'text-red-500'}`}>
                             {pg.achievement.toFixed(1)}%
                           </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
-                          <div className={`h-1.5 rounded-full ${pg.achievement >= data.standardProgressPercent ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.achievement, 100)}%` }}></div>
+                          <div className={`h-1.5 rounded-full ${pg.achievement >= (data as any).standardProgressPercent ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.achievement, 100)}%` }}></div>
                         </div>
                       </td>
                     </tr>

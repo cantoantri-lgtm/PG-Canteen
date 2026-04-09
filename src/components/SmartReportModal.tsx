@@ -713,14 +713,14 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
               </div>
 
               {/* Section 2.5: Phân tích chuyên sâu Nhóm hàng giảm sút (Only for monthly) */}
-              {activeTab === 'monthly' && (currentReport.decliningBrands.length > 0 || currentReport.slowBrands?.length > 0) && (
+              {activeTab === 'monthly' && (currentReport.decliningBrands.length > 0 || (currentReport as any).slowBrands?.length > 0) && (
                 <div className={`${currentReport.decliningBrands.length > 0 ? 'bg-red-50 border-red-100' : 'bg-orange-50 border-orange-100'} rounded-lg border p-5`}>
                   <h3 className={`text-lg font-bold ${currentReport.decliningBrands.length > 0 ? 'text-red-900' : 'text-orange-900'} mb-4 flex items-center`}>
                     <TrendingDown className={`w-5 h-5 mr-2 ${currentReport.decliningBrands.length > 0 ? 'text-red-600' : 'text-orange-600'}`} /> 
                     {currentReport.decliningBrands.length > 0 ? 'Phân tích chuyên sâu: Nhóm hàng suy giảm' : 'Phân tích chuyên sâu: Nhóm hàng bán chậm nhất'}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {(currentReport.decliningBrands.length > 0 ? currentReport.decliningBrands : currentReport.slowBrands).slice(0, 3).map((brand: any, idx: number) => (
+                    {(currentReport.decliningBrands.length > 0 ? currentReport.decliningBrands : (currentReport as any).slowBrands).slice(0, 3).map((brand: any, idx: number) => (
                       <div key={idx} className={`bg-white p-4 rounded-lg shadow-sm border ${currentReport.decliningBrands.length > 0 ? 'border-red-100' : 'border-orange-100'}`}>
                         <div className="flex justify-between items-center mb-3 border-b border-gray-100 pb-2">
                           <span className="font-bold text-gray-900 truncate mr-2" title={brand.name}>{brand.name}</span>

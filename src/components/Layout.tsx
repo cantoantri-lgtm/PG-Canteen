@@ -25,7 +25,6 @@ export default function Layout() {
     { name: 'Channels', href: '/dashboard/admin/channels', icon: Store, category: 'Channel, Account, Cửa hàng' },
     { name: 'Accounts', href: '/dashboard/admin/accounts', icon: Store, category: 'Channel, Account, Cửa hàng' },
     { name: 'Cửa hàng (Shops)', href: '/dashboard/admin/shops', icon: Store, category: 'Channel, Account, Cửa hàng' },
-    { name: 'Thương hiệu', href: '/dashboard/admin/brands', icon: Tag, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Sản phẩm', href: '/dashboard/admin/products', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Hoạt động' },

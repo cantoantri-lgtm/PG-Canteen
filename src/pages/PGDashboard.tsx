@@ -134,9 +134,14 @@ export default function PGDashboard() {
         console.error('Lỗi tải sản phẩm:', error);
         return [];
       }
+
+      // 3.5 Fetch gift products
+      const { data: giftProductsData } = await supabase
+        .from('products')
+        .select('*')
+        .eq('item_type', 'Quà tặng');
       
-      // Flatten the data
-      return (productsData || []).map((p: any) => ({
+      const normalProducts = (productsData || []).map((p: any) => ({
         product_id: p.product_id,
         product_name: p.product_name || p.product_group?.name,
         product_group_name: p.product_group?.name || '',
@@ -144,7 +149,23 @@ export default function PGDashboard() {
         item_type: p.item_type,
         brand_name: p.product_group?.brands?.brand_name || '',
         category_name: p.product_group?.brands?.categories?.name || '',
-      })) as Product[];
+      }));
+
+      const giftProducts = (giftProductsData || []).map((p: any) => ({
+        product_id: p.product_id,
+        product_name: p.product_name || 'Quà tặng',
+        product_group_name: '',
+        value: p.value || 0,
+        item_type: p.item_type,
+        brand_name: '',
+        category_name: '',
+      }));
+
+      // Combine and remove duplicates by product_id
+      const allProducts = [...normalProducts, ...giftProducts];
+      const uniqueProducts = Array.from(new Map(allProducts.map(item => [item.product_id, item])).values());
+
+      return uniqueProducts as Product[];
     },
     enabled: !!user?.id && !!selectedShopId,
   });
@@ -292,7 +313,7 @@ export default function PGDashboard() {
     for (const pending of pendingOcrItems) {
       if (pending.selected_product_id) {
          // 1. Ghi nhận học tập (Learn Alias)
-         await learnAlias(pending.original_name, pending.selected_product_id);
+         await learnAlias(pending.original_name, pending.selected_product_id, pending.price || 0);
          
          // 2. Thêm vào giỏ hàng
          const matchedProduct = products.find(p => p.product_id === pending.selected_product_id);
@@ -303,7 +324,7 @@ export default function PGDashboard() {
               product_group_name: matchedProduct.product_group_name,
               qty: pending.qty,
               net_value: pending.price || matchedProduct.value * pending.qty,
-              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
+              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) as 'Bán hàng' | 'Quà tặng' | 'Mẫu thử',
               switched_from_brand: null
            });
          }

@@ -13,6 +13,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import PGDashboard from './pages/PGDashboard';
 import Shops from './pages/admin/Shops';
 import Brands from './pages/admin/Brands';
+import ProductGroups from './pages/admin/ProductGroups';
 import Products from './pages/admin/Products';
 import Schedules from './pages/admin/Schedules';
 import KPIs from './pages/admin/KPIs';
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="report" element={<ProtectedRoute><PGReport /></ProtectedRoute>} />
             <Route path="admin/shops" element={<ProtectedRoute requireAdmin><Shops /></ProtectedRoute>} />
             <Route path="admin/brands" element={<ProtectedRoute requireAdmin><Brands /></ProtectedRoute>} />
+            <Route path="admin/product-groups" element={<ProtectedRoute requireAdmin><ProductGroups /></ProtectedRoute>} />
             <Route path="admin/products" element={<ProtectedRoute requireAdmin><Products /></ProtectedRoute>} />
             <Route path="admin/schedules" element={<ProtectedRoute requireAdmin><Schedules /></ProtectedRoute>} />
             <Route path="admin/kpis" element={<ProtectedRoute requireAdmin><KPIs /></ProtectedRoute>} />

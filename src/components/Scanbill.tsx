@@ -162,7 +162,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
               product_group_name: matchedProduct.product_group_name,
               qty: item.qty || 1,
               net_value: (item.unit_price || matchedProduct.value) * (item.qty || 1), 
-              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
+              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) as 'Bán hàng' | 'Quà tặng' | 'Mẫu thử',
               switched_from_brand: null
             });
           }
