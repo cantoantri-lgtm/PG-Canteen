@@ -10,15 +10,17 @@ import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 interface Product {
   product_id: string;
   product_name: string;
-  brand_id: string;
+  product_group_id: string;
   value: number;
-  item_type: 'Sản phẩm bán' | 'Quà tặng' | 'Mẫu thử';
-  brands: { brand_name: string };
+  item_type: 'NORMAL_PRODUCT' | 'Quà tặng' | 'Mẫu thử';
+  product_group: { name: string, brands: { brand_name: string, brand_id: string } };
 }
 
-interface Brand {
+interface ProductGroup {
+  id: string;
+  name: string;
   brand_id: string;
-  brand_name: string;
+  brands: { brand_name: string };
 }
 
 export default function Products() {
@@ -37,22 +39,22 @@ export default function Products() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('*, brands(brand_name)')
+        .select('*, product_group(name, brands(brand_name, brand_id))')
         .order('product_name');
       if (error) throw error;
       return data as Product[];
     }
   });
 
-  const { data: brands = [], isLoading: loadingBrands } = useQuery({
-    queryKey: ['brands'],
+  const { data: productGroups = [], isLoading: loadingProductGroups } = useQuery({
+    queryKey: ['product_groups'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('brands')
-        .select('*')
-        .order('brand_name');
+        .from('product_group')
+        .select('*, brands(brand_name)')
+        .order('name');
       if (error) throw error;
-      return data as Brand[];
+      return data as ProductGroup[];
     }
   });
 
@@ -61,25 +63,36 @@ export default function Products() {
     table: 'products',
     queryKey: ['products'],
     idColumn: 'product_id',
+    selectQuery: '*, product_group(name, brands(brand_name, brand_id))'
+  }), []);
+
+  const productGroupSyncConfig = useMemo(() => ({
+    table: 'product_group',
+    queryKey: ['product_groups'],
+    idColumn: 'id',
     selectQuery: '*, brands(brand_name)'
   }), []);
 
-  const brandSyncConfig = useMemo(() => ({
-    table: 'brands',
-    queryKey: ['brands'],
-    idColumn: 'brand_id'
-  }), []);
-
   useRealtimeSync(productSyncConfig);
-  useRealtimeSync(brandSyncConfig);
+  useRealtimeSync(productGroupSyncConfig);
 
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
-      const matchesSearch = p.product_name.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesBrand = selectedBrandFilter === '' || p.brand_id === selectedBrandFilter;
+      const matchesSearch = p.product_name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.product_group?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesBrand = selectedBrandFilter === '' || p.product_group?.brands?.brand_id === selectedBrandFilter;
       return matchesSearch && matchesBrand;
     });
   }, [products, searchQuery, selectedBrandFilter]);
+
+  const uniqueBrands = useMemo(() => {
+    const brandsMap = new Map();
+    productGroups.forEach(pg => {
+      if (pg.brands && pg.brand_id) {
+        brandsMap.set(pg.brand_id, pg.brands.brand_name);
+      }
+    });
+    return Array.from(brandsMap.entries()).map(([id, name]) => ({ id, name }));
+  }, [productGroups]);
 
   // 3. Mutations (Chỉ Đẩy dữ liệu lên Supabase, UI sẽ tự cập nhật qua Realtime)
   const saveMutation = useMutation({
@@ -138,7 +151,7 @@ export default function Products() {
   // 4. Handlers
   const handleAdd = () => {
     setIsAdding(true);
-    setEditForm({ value: 0, item_type: 'Sản phẩm bán' }); 
+    setEditForm({ value: 0, item_type: 'NORMAL_PRODUCT' }); 
     setIsModalOpen(true);
   };
 
@@ -149,16 +162,16 @@ export default function Products() {
   };
 
   const handleSave = (isKeepOpen = false) => {
-    if (!editForm.product_name?.trim() || !editForm.brand_id) {
-      toast.error("Vui lòng nhập Tên sản phẩm và chọn Thương hiệu.");
+    if (!editForm.product_group_id) {
+      toast.error("Vui lòng chọn Nhóm sản phẩm.");
       return;
     }
 
     const payload = {
-      product_name: editForm.product_name.trim(),
-      brand_id: editForm.brand_id,
+      product_name: editForm.product_name?.trim() || null,
+      product_group_id: editForm.product_group_id,
       value: editForm.value || 0,
-      item_type: editForm.item_type || 'Sản phẩm bán',
+      item_type: editForm.item_type || 'NORMAL_PRODUCT',
     };
 
     saveMutation.mutate({ payload, isKeepOpen });
@@ -212,7 +225,7 @@ export default function Products() {
             onChange={(e) => setSelectedBrandFilter(e.target.value)}
           >
             <option value="">Tất cả thương hiệu</option>
-            {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
+            {uniqueBrands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         </div>
       </div>
@@ -224,7 +237,8 @@ export default function Products() {
               <table className="min-w-full divide-y divide-gray-300">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Tên Sản phẩm</th>
+                    <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Nhóm Sản phẩm</th>
+                    <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Chi tiết Sản phẩm</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Thương hiệu</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Loại</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Giá trị quy chuẩn</th>
@@ -234,15 +248,16 @@ export default function Products() {
                 <tbody className="divide-y divide-gray-200 bg-white">
                   {filteredProducts.map((product) => (
                     <tr key={product.product_id}>
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{product.product_name}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.brands?.brand_name}</td>
+                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{product.product_group?.name}</td>
+                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-500 sm:pl-6">{product.product_name || '-'}</td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.product_group?.brands?.brand_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                           product.item_type === 'Quà tặng' ? 'bg-pink-100 text-pink-800' :
                           product.item_type === 'Mẫu thử' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-green-100 text-green-800'
                         }`}>
-                          {product.item_type || 'Sản phẩm bán'}
+                          {product.item_type || 'NORMAL_PRODUCT'}
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm font-semibold text-gray-900">
@@ -264,24 +279,25 @@ export default function Products() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={isAdding ? 'Thêm Sản phẩm' : 'Sửa Sản phẩm'}>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">Tên Sản phẩm *</label>
+            <label className="block text-sm font-medium text-gray-700">Tên Sản phẩm (Chi tiết)</label>
             <input 
               type="text" 
               ref={inputRef}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
               value={editForm.product_name || ''} 
               onChange={e => setEditForm({...editForm, product_name: e.target.value})} 
+              placeholder="Để trống nếu không có chi tiết"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700">Thương hiệu *</label>
+            <label className="block text-sm font-medium text-gray-700">Nhóm sản phẩm *</label>
             <select 
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" 
-              value={editForm.brand_id || ''} 
-              onChange={e => setEditForm({...editForm, brand_id: e.target.value})}
+              value={editForm.product_group_id || ''} 
+              onChange={e => setEditForm({...editForm, product_group_id: e.target.value})}
             >
-              <option value="">-- Chọn Thương hiệu --</option>
-              {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
+              <option value="">-- Chọn Nhóm sản phẩm --</option>
+              {productGroups.map(pg => <option key={pg.id} value={pg.id}>[{pg.brands?.brand_name}] {pg.name}</option>)}
             </select>
           </div>
           <div>

@@ -11,17 +11,17 @@ import Scanbill from '../components/Scanbill';
 interface Product {
   product_id: string;
   product_name: string;
+  product_group_name: string;
   value: number;
-  item_type?: 'Sản phẩm bán' | 'Quà tặng' | 'Mẫu thử';
+  item_type?: 'NORMAL_PRODUCT' | 'Quà tặng' | 'Mẫu thử' | string;
   brand_name: string;
   category_name?: string;
-  product_details?: string;
 }
 
 interface CartItem {
   product_id: string;
   product_name: string;
-  product_details?: string;
+  product_group_name: string;
   qty: number;
   net_value: number;
   item_type: 'Bán hàng' | 'Quà tặng' | 'Mẫu thử';
@@ -49,7 +49,7 @@ export default function PGDashboard() {
   const [selectedShopId, setSelectedShopId] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
-  const [selectedProductName, setSelectedProductName] = useState('');
+  const [selectedProductGroupName, setSelectedProductGroupName] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [qty, setQty] = useState(1);
   const [customAmount, setCustomAmount] = useState('');
@@ -87,20 +87,64 @@ export default function PGDashboard() {
     queryKey: ['allowed_products', user?.id, selectedShopId], 
     queryFn: async () => {
       if (!user?.id || !selectedShopId) return [];
-      const { data, error } = await supabase
-        .from('v_pg_allowed_products')
-        .select('*')
+      
+      // 1. Get schedules for this PG and Shop today
+      const { data: schedules } = await supabase
+        .from('schedules')
+        .select('program_id')
         .eq('pg_id', user.id)
         .eq('shop_id', selectedShopId)
         .lte('start_date', todayStr)
-        .gte('end_date', todayStr)
-        .order('product_name');
+        .gte('end_date', todayStr);
+
+      const programIds = schedules?.map(s => s.program_id) || [];
+      if (programIds.length === 0) return [];
+
+      // 2. Get brand_ids from program_brands
+      const { data: programBrands } = await supabase
+        .from('program_brands')
+        .select('brand_id')
+        .in('program_id', programIds);
+
+      const brandIds = programBrands?.map(pb => pb.brand_id) || [];
+      if (brandIds.length === 0) return [];
+
+      // 3. Fetch products with nested relations
+      const { data: productsData, error } = await supabase
+        .from('products')
+        .select(`
+          *,
+          product_group!inner (
+            id,
+            name,
+            brand_id,
+            brands!inner (
+              brand_id,
+              brand_name,
+              categories (
+                id,
+                name
+              )
+            )
+          )
+        `)
+        .in('product_group.brand_id', brandIds);
         
       if (error) {
         console.error('Lỗi tải sản phẩm:', error);
         return [];
       }
-      return data as Product[];
+      
+      // Flatten the data
+      return (productsData || []).map((p: any) => ({
+        product_id: p.product_id,
+        product_name: p.product_name || p.product_group?.name,
+        product_group_name: p.product_group?.name || '',
+        value: p.value || 0,
+        item_type: p.item_type,
+        brand_name: p.product_group?.brands?.brand_name || '',
+        category_name: p.product_group?.brands?.categories?.name || '',
+      })) as Product[];
     },
     enabled: !!user?.id && !!selectedShopId,
   });
@@ -185,8 +229,11 @@ export default function PGDashboard() {
 
   // --- LOGIC FORM NHẬP LIỆU ---
   
-  const uniqueBrands = Array.from(new Set(products.map(p => p.brand_name).filter(Boolean) as string[]));
   const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean) as string[]));
+  const availableBrandsForCategory = selectedCategory 
+    ? products.filter(p => p.category_name === selectedCategory)
+    : products;
+  const uniqueBrands = Array.from(new Set(availableBrandsForCategory.map(p => p.brand_name).filter(Boolean) as string[]));
   
   const filteredProducts = products.filter(p => {
     if (selectedBrand && p.brand_name !== selectedBrand) return false;
@@ -194,15 +241,15 @@ export default function PGDashboard() {
     return true;
   });
 
-  const uniqueProductNames = Array.from(new Set(filteredProducts.map(p => p.product_name).filter(Boolean) as string[]));
-  const availableDetails = filteredProducts.filter(p => p.product_name === selectedProductName);
+  const uniqueProductGroupNames = Array.from(new Set(filteredProducts.map(p => p.product_group_name).filter(Boolean) as string[]));
+  const availableProducts = filteredProducts.filter(p => p.product_group_name === selectedProductGroupName);
 
   // Tự động chọn chi tiết sản phẩm nếu chỉ có 1 lựa chọn
   useEffect(() => {
-    if (selectedProductName && availableDetails.length === 1 && !selectedProductId) {
-      setSelectedProductId(availableDetails[0].product_id);
+    if (selectedProductGroupName && availableProducts.length === 1 && !selectedProductId) {
+      setSelectedProductId(availableProducts[0].product_id);
     }
-  }, [selectedProductName, availableDetails, selectedProductId]);
+  }, [selectedProductGroupName, availableProducts, selectedProductId]);
 
   const addToCart = () => {
     const product = products.find(p => p.product_id === selectedProductId);
@@ -212,14 +259,14 @@ export default function PGDashboard() {
     setCart([...cart, { 
       product_id: product.product_id, 
       product_name: product.product_name, 
-      product_details: product.product_details,
+      product_group_name: product.product_group_name,
       qty, net_value: finalAmount,
       item_type: (product as any).item_type || selectedProductType,
       switched_from_brand: isConverted ? competitorBrand : null
     }]);
     
     // Reset form sau khi thêm
-    setSelectedProductName(''); setSelectedProductId(''); setQty(1); setCustomAmount(''); setIsConverted(false); setCompetitorBrand('');
+    setSelectedProductGroupName(''); setSelectedProductId(''); setQty(1); setCustomAmount(''); setIsConverted(false); setCompetitorBrand('');
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.net_value, 0);
@@ -412,27 +459,25 @@ export default function PGDashboard() {
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2">
-            <select className="w-full p-2.5 border rounded-xl" value={selectedCategory} onChange={e => {setSelectedCategory(e.target.value); setSelectedProductName(''); setSelectedProductId('');}}>
+            <select className="w-full p-2.5 border rounded-xl" value={selectedCategory} onChange={e => {setSelectedCategory(e.target.value); setSelectedProductGroupName(''); setSelectedProductId('');}}>
               <option value="">-- Lọc Ngành hàng --</option>
               {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select className="w-full p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductName(''); setSelectedProductId('');}}>
+            <select className="w-full p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductGroupName(''); setSelectedProductId('');}}>
               <option value="">-- Lọc Hãng --</option>
               {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
           </div>
-          <select className="w-full p-2.5 border rounded-xl" value={selectedProductName} onChange={e => {setSelectedProductName(e.target.value); setSelectedProductId('');}}>
-            <option value="" disabled>Chọn SP...</option>
-            {uniqueProductNames.map(name => <option key={name} value={name}>{name}</option>)}
+          <select className="w-full p-2.5 border rounded-xl" value={selectedProductGroupName} onChange={e => {setSelectedProductGroupName(e.target.value); setSelectedProductId('');}}>
+            <option value="" disabled>Chọn Nhóm SP...</option>
+            {uniqueProductGroupNames.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
-          {selectedProductName && (
-            <select className="w-full p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
-              <option value="" disabled>Chi tiết SP...</option>
-              {availableDetails.map(p => (
-                <option key={p.product_id} value={p.product_id}>{p.product_details || 'Mặc định'}</option>
-              ))}
-            </select>
-          )}
+          <select className="w-full p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
+            <option value="" disabled>Chọn Sản phẩm...</option>
+            {availableProducts.map(p => (
+              <option key={p.product_id} value={p.product_id}>{p.product_name || 'Mặc định'}</option>
+            ))}
+          </select>
         </div>
 
         <div className="flex gap-2 items-end">
@@ -475,8 +520,8 @@ export default function PGDashboard() {
             {cart.map((item, idx) => (
               <li key={idx} className="flex justify-between items-center text-sm border-b border-gray-100 pb-3 last:border-0 last:pb-0">
                 <div className="flex flex-col pr-2">
-                  <span className="font-medium text-gray-800">{item.qty}x {item.product_name}</span>
-                  {item.product_details && <span className="text-xs text-gray-500">{item.product_details}</span>}
+                  <span className="font-medium text-gray-800">{item.qty}x {item.product_group_name}</span>
+                  <span className="text-xs text-gray-500">{item.product_name}</span>
                   {item.switched_from_brand && <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded w-fit mt-1">Đổi từ: {item.switched_from_brand}</span>}
                 </div>
                 <div className="flex items-center space-x-3">

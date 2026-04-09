@@ -7,17 +7,17 @@ import { matchProduct } from '../services/ocrLearningService';
 interface Product {
   product_id: string;
   product_name: string;
+  product_group_name: string;
   value: number;
-  item_type?: 'Sản phẩm bán' | 'Quà tặng' | 'Mẫu thử';
+  item_type?: 'NORMAL_PRODUCT' | 'Quà tặng' | 'Mẫu thử' | string;
   brand_name: string;
   category_name?: string;
-  product_details?: string;
 }
 
 interface CartItem {
   product_id: string;
   product_name: string;
-  product_details?: string;
+  product_group_name: string;
   qty: number;
   net_value: number;
   item_type: 'Bán hàng' | 'Quà tặng' | 'Mẫu thử';
@@ -84,15 +84,15 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       }
       const ai = new GoogleGenAI({ apiKey });
       
-      // Gửi danh sách sản phẩm bao gồm nhãn + sản phẩm + chi tiết sản phẩm
+      // Gửi danh sách sản phẩm bao gồm nhãn + nhóm sản phẩm + sản phẩm
       const productNamesList = products.map(p => {
-        const details = p.product_details ? ` - ${p.product_details}` : '';
-        return `[${p.brand_name || 'Không rõ nhãn'}] ${p.product_name}${details}`;
+        const details = p.product_name ? ` - ${p.product_name}` : '';
+        return `[${p.brand_name || 'Không rõ nhãn'}] ${p.product_group_name}${details}`;
       }).join('\n');
       
       const promptText = `Trích xuất danh sách các sản phẩm có trong hóa đơn này. 
 CHÚ Ý QUAN TRỌNG: Chỉ trích xuất các sản phẩm có khả năng thuộc danh mục sản phẩm của công ty (ví dụ: Băng vệ sinh, tã, bỉm, giấy ướt, bông tẩy trang...). Bỏ qua hoàn toàn các sản phẩm không liên quan (như nước ngọt, đồ ăn, thức uống, phí dịch vụ...).
-Danh sách sản phẩm công ty đang bán để tham khảo (Định dạng: [Nhãn hàng] Tên sản phẩm - Chi tiết):
+Danh sách sản phẩm công ty đang bán để tham khảo (Định dạng: [Nhãn hàng] Nhóm sản phẩm - Tên sản phẩm):
 ${productNamesList}
 
 Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn), 'qty' (số lượng), 'price' (tổng giá tiền của sản phẩm đó).`;
@@ -149,7 +149,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
             newCartItems.push({
               product_id: matchedProduct.product_id,
               product_name: matchedProduct.product_name,
-              product_details: matchedProduct.product_details,
+              product_group_name: matchedProduct.product_group_name,
               qty: item.qty || 1,
               net_value: item.price || matchedProduct.value * (item.qty || 1),
               item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
