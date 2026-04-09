@@ -91,8 +91,8 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
 
 NHIỆM VỤ: 
-Trích xuất TẤT CẢ các sản phẩm có khả năng thuộc các ngành hàng: [${categoryList}].
-Lưu ý: Hóa đơn thường viết tắt rất nhiều (ví dụ: BVS, Ta quan, K.Uot, sz, m). Đừng bỏ sót chúng. Bỏ qua các mặt hàng thực phẩm tươi sống hoặc đồ gia dụng rõ ràng không liên quan.
+Trích xuất TẤT CẢ các sản phẩm có trên hóa đơn.
+Với mỗi sản phẩm, hãy phân loại xem nó thuộc ngành hàng nào trong danh sách sau: [${categoryList}]. Nếu không thuộc ngành hàng nào trong danh sách, hãy xếp vào loại "Khác".
 
 HƯỚNG DẪN BÓC TÁCH GIÁ (CRITICAL):
 Phải lấy đúng ĐƠN GIÁ (Unit Price) của 1 sản phẩm. KHÔNG lấy Thành tiền.
@@ -103,10 +103,10 @@ Cấu trúc hóa đơn thường hiển thị theo cặp dòng:
 Ví dụ:
 "BVS Diana Sensicool ko canh 8m"
 "2,00      22.000      44.000"
--> Kết quả: raw_name: "BVS Diana Sensicool ko canh 8m", qty: 2, unit_price: 22000
+-> Kết quả: raw_name: "BVS Diana Sensicool ko canh 8m", qty: 2, unit_price: 22000, category: "Băng vệ sinh"
 
 ĐỊNH DẠNG ĐẦU RA:
-Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), và 'unit_price' (đơn giá).`;
+Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), 'unit_price' (đơn giá), và 'category' (ngành hàng).`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -128,7 +128,8 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
               properties: {
                 raw_name: { type: Type.STRING },
                 qty: { type: Type.NUMBER },
-                unit_price: { type: Type.NUMBER }
+                unit_price: { type: Type.NUMBER },
+                category: { type: Type.STRING }
               }
             }
           }
@@ -151,6 +152,10 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       const newPendingItems: PendingOcrItem[] = [];
 
       for (const item of items) {
+        if (item.category === 'Khác' || !uniqueCategories.includes(item.category)) {
+          continue; // Bỏ qua không đúng ngành hàng
+        }
+
         const matchResult = matchProduct(item.raw_name, item.unit_price, products, productAliases);
 
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {

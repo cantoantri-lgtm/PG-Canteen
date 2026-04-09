@@ -10,13 +10,6 @@ import Fuse from 'fuse.js';
  */
 export const matchProduct = (extracted_name: string, unit_price: number, products: any[], aliases: any[]) => {
   try {
-    if (!extracted_name) {
-      return {
-        matchType: 'none',
-        product_id: null,
-        suggestions: []
-      };
-    }
     const normalizedExtractedName = extracted_name.trim().toLowerCase();
     const billPrice = unit_price || 0;
 
@@ -47,68 +40,93 @@ export const matchProduct = (extracted_name: string, unit_price: number, product
     }
 
     // ==========================================
-    // BƯỚC 2: TÌM KIẾM THEO CHỮ (FUZZY MATCH)
+    // BƯỚC 2: TÌM KIẾM THEO TRỌNG SỐ (WEIGHTED MATCHING)
     // ==========================================
-    // Ghép Brand + Group + Name để Fuse.js dễ tìm chữ "Diana" hoặc "BVS"
-    const productFuseData = products.map(p => ({
-      ...p,
-      search_term: `${p.brand_name || ''} ${p.product_group_name || ''} ${p.product_name || ''}`.trim()
-    }));
+    // Trọng số: Nhãn hàng 40%, Nhóm hàng 30%, Tên sản phẩm 30%
+    const rawWords = normalizedExtractedName.split(/[\s\-\+]+/);
 
-    const productFuse = new Fuse(productFuseData, {
-      includeScore: true,
-      threshold: 0.6, // Ngưỡng 0.6: Lọc ra tất cả những thằng có "vẻ" giống chữ trên bill
-      keys: ['search_term'],
-      ignoreLocation: true
+    const scoredCandidates = products.map(product => {
+      let textScore = 0; // Điểm càng cao càng tốt (Max 1.0)
+
+      // 1. Brand (40%)
+      if (product.brand_name) {
+        const brandLower = product.brand_name.toLowerCase();
+        if (normalizedExtractedName.includes(brandLower)) {
+          textScore += 0.4;
+        } else {
+          const brandWords = brandLower.split(/[\s\-\+]+/);
+          const matched = brandWords.filter((w: string) => rawWords.includes(w)).length;
+          textScore += (matched / brandWords.length) * 0.4;
+        }
+      }
+
+      // 2. Group (30%)
+      if (product.product_group_name) {
+        const groupLower = product.product_group_name.toLowerCase();
+        if (normalizedExtractedName.includes(groupLower)) {
+          textScore += 0.3;
+        } else {
+          const groupWords = groupLower.split(/[\s\-\+]+/);
+          const matched = groupWords.filter((w: string) => rawWords.includes(w)).length;
+          textScore += (matched / groupWords.length) * 0.3;
+        }
+      }
+
+      // 3. Name (30%)
+      if (product.product_name) {
+        const nameLower = product.product_name.toLowerCase();
+        const nameWords = nameLower.split(/[\s\-\+]+/);
+        const matched = nameWords.filter((w: string) => rawWords.includes(w)).length;
+        textScore += (matched / nameWords.length) * 0.3;
+      }
+
+      const dbPrice = product.value || 0;
+      const priceDiff = Math.abs(dbPrice - billPrice);
+
+      return {
+        ...product,
+        textScore,
+        priceDiff
+      };
     });
 
-    const textResults = productFuse.search(normalizedExtractedName);
+    // Lọc bỏ những sản phẩm có điểm textScore quá thấp (ví dụ < 0.1) để tránh nhiễu
+    const validCandidates = scoredCandidates.filter(c => c.textScore >= 0.1);
 
-    if (textResults.length > 0) {
+    if (validCandidates.length > 0) {
       // ==========================================
-      // BƯỚC 3: PHÂN LỌC THEO PHÂN KHÚC GIÁ (PRICE SEGMENTING)
+      // BƯỚC 3: PHÂN LỌC VÀ SẮP XẾP
       // ==========================================
-      const scoredCandidates = textResults.map(result => {
-        const product = result.item;
-        const textScore = result.score || 0; // Điểm chữ (càng nhỏ càng giống)
-        const dbPrice = product.value || 0;
-        
-        // Tính độ lệch giá tuyệt đối (VND)
-        const priceDiff = Math.abs(dbPrice - billPrice);
-
-        return {
-          ...product,
-          textScore,
-          priceDiff
-        };
-      });
-
-      // Thuật toán sắp xếp: Ưu tiên ĐỘ LỆCH GIÁ NHỎ NHẤT lên Top 1
-      scoredCandidates.sort((a, b) => {
-        // Nếu giá của 2 sản phẩm chênh nhau không đáng kể (dưới 5000đ), thì ai khớp chữ hơn sẽ lên trên
-        if (Math.abs(a.priceDiff - b.priceDiff) < 5000) {
-          return a.textScore - b.textScore;
+      // Sắp xếp: Ưu tiên điểm textScore cao nhất. Nếu điểm bằng nhau, ưu tiên lệch giá ít nhất.
+      validCandidates.sort((a, b) => {
+        // Nếu điểm textScore chênh lệch rõ rệt (ví dụ > 0.1), ưu tiên textScore
+        if (Math.abs(b.textScore - a.textScore) > 0.1) {
+          return b.textScore - a.textScore;
         }
-        // Còn lại, thằng nào có giá sát với giá Bill nhất sẽ trồi lên
-        return a.priceDiff - b.priceDiff;
+        // Nếu điểm textScore tương đương, ưu tiên giá sát nhất
+        if (Math.abs(a.priceDiff - b.priceDiff) > 1000) {
+          return a.priceDiff - b.priceDiff;
+        }
+        // Nếu giá cũng tương đương, vẫn ưu tiên textScore
+        return b.textScore - a.textScore;
       });
 
-      const bestCandidate = scoredCandidates[0];
+      const bestCandidate = validCandidates[0];
 
       // Đánh giá kết quả cuối cùng
-      // Nếu lệch giá rất thấp (< 10%) VÀ chữ khá giống (< 0.3) -> Chốt luôn
+      // Nếu lệch giá rất thấp (< 15%) VÀ chữ khá giống (>= 0.7) -> Chốt luôn
       const priceDiffRatio = bestCandidate.value ? bestCandidate.priceDiff / bestCandidate.value : 1;
       
-      if (priceDiffRatio <= 0.1 && bestCandidate.textScore <= 0.3) {
+      if (priceDiffRatio <= 0.15 && bestCandidate.textScore >= 0.7) {
         return {
           matchType: 'fuzzy_high',
           product_id: bestCandidate.product_id,
           suggestions: []
         };
       } else {
-        // Nếu không quá chắc chắn, trả về Top 5 phân khúc giá gần nhất cho PG chọn
-        const uniqueSuggestions = scoredCandidates
-          .slice(0, 5)
+        // Nếu không quá chắc chắn, trả về Top 10 sản phẩm gần đúng nhất cho PG chọn
+        const uniqueSuggestions = validCandidates
+          .slice(0, 10)
           .map(c => products.find(p => p.product_id === c.product_id))
           .filter(Boolean);
 
