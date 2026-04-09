@@ -27,7 +27,7 @@ interface CartItem {
 interface PendingOcrItem {
   original_name: string;
   qty: number;
-  price: number; // Lưu ý: Ở component cha, price này sẽ đại diện cho đơn giá (unit_price) để PG dễ nhìn
+  price: number;
   suggestions: any[];
   selected_product_id?: string;
 }
@@ -84,32 +84,29 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       }
       const ai = new GoogleGenAI({ apiKey });
       
-      // Lấy danh sách nhóm ngành hàng duy nhất
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
-      const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang...';
+      const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang';
       
-      // Cập nhật Prompt tối ưu hóa cho việc bóc tách ĐƠN GIÁ (unit_price)
-      const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị và cửa hàng tiện lợi.
+      // SỬA LỖI 1: Tinh chỉnh lại Prompt, loại bỏ các từ cấm đoán quá mạnh, thêm ví dụ thực tế.
+      const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
 
 NHIỆM VỤ: 
-Trích xuất danh sách các mặt hàng có mặt trên hóa đơn thuộc các NHÓM NGÀNH HÀNG sau: [${categoryList}].
-
-ĐIỀU KIỆN LOẠI TRỪ (QUAN TRỌNG): 
-Tuyệt đối BỎ QUA tất cả các sản phẩm là thực phẩm, đồ ăn, đồ uống hoặc hóa mỹ phẩm không liên quan.
+Trích xuất TẤT CẢ các sản phẩm có khả năng thuộc các ngành hàng: [${categoryList}].
+Lưu ý: Hóa đơn thường viết tắt rất nhiều (ví dụ: BVS, Ta quan, K.Uot, sz, m). Đừng bỏ sót chúng. Bỏ qua các mặt hàng thực phẩm tươi sống hoặc đồ gia dụng rõ ràng không liên quan.
 
 HƯỚNG DẪN BÓC TÁCH GIÁ (CRITICAL):
-Tên sản phẩm cùng loại trên hóa đơn thường in giống hệt nhau. Do đó, ĐƠN GIÁ (Unit Price) là yếu tố sống còn để hệ thống phân loại phân khúc sản phẩm.
+Phải lấy đúng ĐƠN GIÁ (Unit Price) của 1 sản phẩm. KHÔNG lấy Thành tiền.
 Cấu trúc hóa đơn thường hiển thị theo cặp dòng: 
 - Dòng trên: [Tên Sản Phẩm]
 - Dòng dưới: [Số lượng]      [Đơn giá]      [Thành tiền]
 
-Ví dụ minh họa từ hóa đơn thực tế:
-"BVS Diana Băng Quần Size (L-XL/2m)"
-"2,00      45.000      90.000"
--> Bạn phải lấy ĐƠN GIÁ (unit_price) là 45000 (tuyệt đối không lấy giá thành tiền 90000).
+Ví dụ:
+"BVS Diana Sensicool ko canh 8m"
+"2,00      22.000      44.000"
+-> Kết quả: raw_name: "BVS Diana Sensicool ko canh 8m", qty: 2, unit_price: 22000
 
 ĐỊNH DẠNG ĐẦU RA:
-Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), và 'unit_price' (đơn giá của 1 sản phẩm).`;
+Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), và 'unit_price' (đơn giá).`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -131,7 +128,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
               properties: {
                 raw_name: { type: Type.STRING },
                 qty: { type: Type.NUMBER },
-                unit_price: { type: Type.NUMBER } // Yêu cầu AI trả về chuẩn Đơn giá
+                unit_price: { type: Type.NUMBER }
               }
             }
           }
@@ -154,7 +151,6 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       const newPendingItems: PendingOcrItem[] = [];
 
       for (const item of items) {
-        // Gọi hàm matchProduct ĐÃ CẬP NHẬT: Truyền thêm item.unit_price vào để tính điểm
         const matchResult = matchProduct(item.raw_name, item.unit_price, products, productAliases);
 
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
@@ -165,31 +161,64 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
               product_name: matchedProduct.product_name,
               product_group_name: matchedProduct.product_group_name,
               qty: item.qty || 1,
-              // net_value (Thành tiền) = Đơn giá trên bill (hoặc DB nếu thiếu) * số lượng
               net_value: (item.unit_price || matchedProduct.value) * (item.qty || 1), 
               item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
               switched_from_brand: null
             });
           }
-        } else if (matchResult.matchType === 'fuzzy_low' && matchResult.suggestions.length > 0) {
-          // Cần PG xác nhận thủ công (chỉ khi có suggestions)
+        } else {
+          // SỬA LỖI 2 & 3: Xử lý mọi trường hợp còn lại (fuzzy_low, none) thay vì bỏ qua
+          let suggestions = matchResult.suggestions || [];
+
+          // Nếu hàm matchProduct trả về mảng rỗng, tự động tính toán Top 5 dựa trên tên và giá
+          if (suggestions.length === 0) {
+            const rawWords = item.raw_name.toLowerCase().split(/[ \-\+]+/); // Cắt chuỗi thành các từ
+            
+            const scoredProducts = products.map(p => {
+              let score = 0;
+              const pName = p.product_name.toLowerCase();
+              
+              // 1. Cộng điểm nếu trùng từ khóa (ưu tiên từ khóa dài > 2 ký tự)
+              rawWords.forEach(word => {
+                if (word.length > 2 && pName.includes(word)) score += 15;
+              });
+
+              // 2. Trừ điểm nếu lệch giá (Càng lệch giá càng bị trừ nhiều điểm)
+              const priceDiff = Math.abs(p.value - (item.unit_price || 0));
+              score -= (priceDiff / 5000); // Ví dụ: lệch 5k bị trừ 1 điểm
+
+              return { ...p, score };
+            });
+
+            // Lấy ra Top 5 sản phẩm có điểm số cao nhất
+            suggestions = scoredProducts
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 5)
+              .map(p => ({
+                product_id: p.product_id,
+                product_name: p.product_name,
+                product_group_name: p.product_group_name,
+                value: p.value
+              }));
+          } else {
+            // Đảm bảo suggestions trả về từ hàm chỉ lấy tối đa 5
+            suggestions = suggestions.slice(0, 5);
+          }
+
+          // Đẩy vào danh sách Pending để PG kiểm tra thủ công
           newPendingItems.push({
             original_name: item.raw_name,
             qty: item.qty || 1,
-            price: item.unit_price || 0, // Đưa đơn giá ra giao diện cho PG kiểm tra
-            suggestions: matchResult.suggestions,
-            selected_product_id: matchResult.suggestions[0]?.product_id || ''
+            price: item.unit_price || 0,
+            suggestions: suggestions,
+            selected_product_id: suggestions[0]?.product_id || ''
           });
-        } else {
-          // matchType === 'none' -> Bỏ qua hoàn toàn
-          console.log('Đã bỏ qua sản phẩm không liên quan / sai giá quá xa:', item.raw_name);
         }
       }
 
       onScanComplete(newCartItems, newPendingItems);
       setIsScanning(false);
       
-      // Reset input file
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -208,7 +237,6 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
         toast.error('Lỗi khi quét hóa đơn. Vui lòng thử lại.');
       }
       
-      // Reset input file
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -234,7 +262,6 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
         className="hidden" 
       />
 
-      {/* MODAL TIẾN TRÌNH QUÉT BILL */}
       {isScanning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col items-center text-center">
