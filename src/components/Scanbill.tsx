@@ -84,18 +84,14 @@ export default function Scanbill({ products, productAliases, onScanComplete, dis
       }
       const ai = new GoogleGenAI({ apiKey });
       
-      // Gửi danh sách sản phẩm bao gồm nhãn + nhóm sản phẩm + sản phẩm
-      const productNamesList = products.map(p => {
-        const details = p.product_name ? ` - ${p.product_name}` : '';
-        return `[${p.brand_name || 'Không rõ nhãn'}] ${p.product_group_name}${details}`;
-      }).join('\n');
+      // Lấy danh sách nhóm ngành hàng duy nhất
+      const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
+      const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang...';
       
-      const promptText = `Trích xuất danh sách các sản phẩm có trong hóa đơn này. 
-CHÚ Ý QUAN TRỌNG: Chỉ trích xuất các sản phẩm có khả năng thuộc danh mục sản phẩm của công ty (ví dụ: Băng vệ sinh, tã, bỉm, giấy ướt, bông tẩy trang...). Bỏ qua hoàn toàn các sản phẩm không liên quan (như nước ngọt, đồ ăn, thức uống, phí dịch vụ...).
-Danh sách sản phẩm công ty đang bán để tham khảo (Định dạng: [Nhãn hàng] Nhóm sản phẩm - Tên sản phẩm):
-${productNamesList}
-
-Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn), 'qty' (số lượng), 'price' (tổng giá tiền của sản phẩm đó).`;
+      const promptText = `Bạn là hệ thống trích xuất dữ liệu hóa đơn.
+Trích xuất toàn bộ các mặt hàng trên hóa đơn này có khả năng thuộc các NHÓM NGÀNH HÀNG sau: [${categoryList}].
+TUYỆT ĐỐI BỎ QUA các sản phẩm không thuộc các nhóm trên (ví dụ: thực phẩm, đồ uống, hóa mỹ phẩm khác).
+Trả về JSON với 'raw_name' (giữ đúng 100% từng chữ cái trên hóa đơn), 'qty', 'price'.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
@@ -115,7 +111,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
             items: {
               type: Type.OBJECT,
               properties: {
-                product_name: { type: Type.STRING },
+                raw_name: { type: Type.STRING },
                 qty: { type: Type.NUMBER },
                 price: { type: Type.NUMBER }
               }
@@ -141,7 +137,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
 
       for (const item of items) {
         // Sử dụng logic matchProduct (Self-learning OCR) với dữ liệu RAM
-        const matchResult = matchProduct(item.product_name, products, productAliases);
+        const matchResult = matchProduct(item.raw_name, products, productAliases);
 
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
           const matchedProduct = products.find(p => p.product_id === matchResult.product_id);
@@ -159,7 +155,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
         } else if (matchResult.matchType === 'fuzzy_low' && matchResult.suggestions.length > 0) {
           // Cần PG xác nhận thủ công (chỉ khi có suggestions)
           newPendingItems.push({
-            original_name: item.product_name,
+            original_name: item.raw_name,
             qty: item.qty || 1,
             price: item.price || 0,
             suggestions: matchResult.suggestions,
@@ -167,7 +163,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
           });
         } else {
           // matchType === 'none' -> Bỏ qua hoàn toàn vì là sản phẩm rác/không bán
-          console.log('Đã bỏ qua sản phẩm không liên quan:', item.product_name);
+          console.log('Đã bỏ qua sản phẩm không liên quan:', item.raw_name);
         }
       }
 

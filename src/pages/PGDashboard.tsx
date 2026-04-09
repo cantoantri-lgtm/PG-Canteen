@@ -300,7 +300,7 @@ export default function PGDashboard() {
            resolvedCartItems.push({
               product_id: matchedProduct.product_id,
               product_name: matchedProduct.product_name,
-              product_details: matchedProduct.product_details,
+              product_group_name: matchedProduct.product_group_name,
               qty: pending.qty,
               net_value: pending.price || matchedProduct.value * pending.qty,
               item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
