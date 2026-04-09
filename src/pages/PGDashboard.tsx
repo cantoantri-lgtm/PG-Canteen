@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Camera, Check, X } from 'lucide-react';
 import { matchProduct, learnAlias } from '../services/ocrLearningService';
+import Scanbill from '../components/Scanbill';
 
 interface Product {
   product_id: string;
@@ -13,11 +14,14 @@ interface Product {
   value: number;
   item_type?: 'Sản phẩm bán' | 'Quà tặng' | 'Mẫu thử';
   brand_name: string;
+  category_name?: string;
+  product_details?: string;
 }
 
 interface CartItem {
   product_id: string;
   product_name: string;
+  product_details?: string;
   qty: number;
   net_value: number;
   item_type: 'Bán hàng' | 'Quà tặng' | 'Mẫu thử';
@@ -44,6 +48,8 @@ export default function PGDashboard() {
   // --- STATE (CÁC BIẾN TRÊN FORM) ---
   const [selectedShopId, setSelectedShopId] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedProductName, setSelectedProductName] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [qty, setQty] = useState(1);
   const [customAmount, setCustomAmount] = useState('');
@@ -180,9 +186,23 @@ export default function PGDashboard() {
   // --- LOGIC FORM NHẬP LIỆU ---
   
   const uniqueBrands = Array.from(new Set(products.map(p => p.brand_name).filter(Boolean) as string[]));
-  const filteredProducts = selectedBrand 
-    ? products.filter(p => p.brand_name === selectedBrand) 
-    : products;
+  const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean) as string[]));
+  
+  const filteredProducts = products.filter(p => {
+    if (selectedBrand && p.brand_name !== selectedBrand) return false;
+    if (selectedCategory && p.category_name !== selectedCategory) return false;
+    return true;
+  });
+
+  const uniqueProductNames = Array.from(new Set(filteredProducts.map(p => p.product_name).filter(Boolean) as string[]));
+  const availableDetails = filteredProducts.filter(p => p.product_name === selectedProductName);
+
+  // Tự động chọn chi tiết sản phẩm nếu chỉ có 1 lựa chọn
+  useEffect(() => {
+    if (selectedProductName && availableDetails.length === 1 && !selectedProductId) {
+      setSelectedProductId(availableDetails[0].product_id);
+    }
+  }, [selectedProductName, availableDetails, selectedProductId]);
 
   const addToCart = () => {
     const product = products.find(p => p.product_id === selectedProductId);
@@ -192,175 +212,29 @@ export default function PGDashboard() {
     setCart([...cart, { 
       product_id: product.product_id, 
       product_name: product.product_name, 
+      product_details: product.product_details,
       qty, net_value: finalAmount,
       item_type: (product as any).item_type || selectedProductType,
       switched_from_brand: isConverted ? competitorBrand : null
     }]);
     
     // Reset form sau khi thêm
-    setSelectedProductId(''); setQty(1); setCustomAmount(''); setIsConverted(false); setCompetitorBrand('');
+    setSelectedProductName(''); setSelectedProductId(''); setQty(1); setCustomAmount(''); setIsConverted(false); setCompetitorBrand('');
   };
 
   const cartTotal = cart.reduce((sum, item) => sum + item.net_value, 0);
 
-  // --- LOGIC QUÉT BILL ---
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanProgress, setScanProgress] = useState(0);
-  const [scanStatus, setScanStatus] = useState('');
+  const handleScanComplete = (newCartItems: CartItem[], newPendingItems: PendingOcrItem[]) => {
+    if (newCartItems.length > 0) {
+      setCart(prev => [...prev, ...newCartItems]);
+      toast.success(`Đã tự động thêm ${newCartItems.length} sản phẩm vào giỏ hàng!`);
+    }
 
-  const handleScanBill = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsScanning(true);
-    setScanProgress(5);
-    setScanStatus('Đang tải ảnh lên...');
-    
-    const progressInterval = setInterval(() => {
-      setScanProgress(prev => {
-        if (prev < 30) {
-          setScanStatus('Đang phân tích hình ảnh...');
-          return prev + 5;
-        } else if (prev < 70) {
-          setScanStatus('AI đang đọc dữ liệu...');
-          return prev + 3;
-        } else if (prev < 95) {
-          setScanStatus('Đang trích xuất sản phẩm...');
-          return prev + 1;
-        }
-        return prev;
-      });
-    }, 400);
-
-    try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      await new Promise((resolve) => (reader.onload = resolve));
-      const base64Data = (reader.result as string).split(',')[1];
-
-      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
-      if (!apiKey || apiKey === "") {
-        toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
-        clearInterval(progressInterval);
-        setIsScanning(false);
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey });
-      
-      const productNamesList = products.map(p => p.product_name).join('\n');
-      const promptText = `Trích xuất danh sách các sản phẩm có trong hóa đơn này. 
-CHÚ Ý QUAN TRỌNG: Chỉ trích xuất các sản phẩm có khả năng thuộc danh mục sản phẩm của công ty (ví dụ: Băng vệ sinh, tã, bỉm, giấy ướt, bông tẩy trang...). Bỏ qua hoàn toàn các sản phẩm không liên quan (như nước ngọt, đồ ăn, thức uống, phí dịch vụ...).
-Danh sách sản phẩm công ty đang bán để tham khảo:
-${productNamesList}
-
-Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn), 'qty' (số lượng), 'price' (tổng giá tiền của sản phẩm đó).`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: file.type,
-            }
-          },
-          promptText
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                product_name: { type: Type.STRING },
-                qty: { type: Type.NUMBER },
-                price: { type: Type.NUMBER }
-              }
-            }
-          }
-        }
-      });
-
-      clearInterval(progressInterval);
-      setScanProgress(100);
-      setScanStatus('Hoàn tất!');
-
-      const items = JSON.parse(response.text || '[]');
-      
-      if (items.length === 0) {
-        toast.error('Không tìm thấy sản phẩm nào trong hóa đơn.');
-        return;
-      }
-
-      let autoAddedCount = 0;
-      const newCartItems: CartItem[] = [];
-      const newPendingItems: PendingOcrItem[] = [];
-
-      for (const item of items) {
-        // Sử dụng logic matchProduct (Self-learning OCR) với dữ liệu RAM
-        const matchResult = matchProduct(item.product_name, products, productAliases);
-
-        if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
-          const matchedProduct = products.find(p => p.product_id === matchResult.product_id);
-          if (matchedProduct) {
-            newCartItems.push({
-              product_id: matchedProduct.product_id,
-              product_name: matchedProduct.product_name,
-              qty: item.qty || 1,
-              net_value: item.price || matchedProduct.value * (item.qty || 1),
-              item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
-              switched_from_brand: null
-            });
-            autoAddedCount++;
-          }
-        } else if (matchResult.matchType === 'fuzzy_low' && matchResult.suggestions.length > 0) {
-          // Cần PG xác nhận thủ công (chỉ khi có suggestions)
-          newPendingItems.push({
-            original_name: item.product_name,
-            qty: item.qty || 1,
-            price: item.price || 0,
-            suggestions: matchResult.suggestions,
-            selected_product_id: matchResult.suggestions[0]?.product_id || ''
-          });
-        } else {
-          // matchType === 'none' -> Bỏ qua hoàn toàn vì là sản phẩm rác/không bán
-          console.log('Đã bỏ qua sản phẩm không liên quan:', item.product_name);
-        }
-      }
-
-      if (autoAddedCount > 0) {
-        setCart(prev => [...prev, ...newCartItems]);
-        toast.success(`Đã tự động thêm ${autoAddedCount} sản phẩm vào giỏ hàng!`);
-      }
-
-      if (newPendingItems.length > 0) {
-        setPendingOcrItems(newPendingItems);
-        setShowOcrModal(true);
-      } else if (autoAddedCount === 0) {
-        toast.warning('Đã quét hóa đơn nhưng không có sản phẩm nào khớp với danh mục được phép bán.');
-      }
-
-    } catch (error: any) {
-      clearInterval(progressInterval);
-      console.error('Lỗi quét hóa đơn:', error);
-      
-      const errorMsg = error.message || '';
-      if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
-        toast.error('Server đang quá tải. Thử lại sau 5 giây');
-      } else if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút');
-      } else {
-        toast.error('Lỗi khi quét hóa đơn: ' + error.message);
-      }
-    } finally {
-      setTimeout(() => {
-        setIsScanning(false);
-        setScanProgress(0);
-        setScanStatus('');
-      }, 1000);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    if (newPendingItems.length > 0) {
+      setPendingOcrItems(newPendingItems);
+      setShowOcrModal(true);
+    } else if (newCartItems.length === 0) {
+      toast.warning('Đã quét hóa đơn nhưng không có sản phẩm nào khớp với danh mục được phép bán.');
     }
   };
 
@@ -379,6 +253,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
            resolvedCartItems.push({
               product_id: matchedProduct.product_id,
               product_name: matchedProduct.product_name,
+              product_details: matchedProduct.product_details,
               qty: pending.qty,
               net_value: pending.price || matchedProduct.value * pending.qty,
               item_type: (matchedProduct.item_type === 'Sản phẩm bán' ? 'Bán hàng' : matchedProduct.item_type) || 'Bán hàng',
@@ -536,14 +411,28 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
         </select>
 
         <div className="space-y-4">
-          <select className="w-full p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductId('');}}>
-            <option value="">-- Lọc Hãng --</option>
-            {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
-          <select className="w-full p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
+          <div className="grid grid-cols-2 gap-2">
+            <select className="w-full p-2.5 border rounded-xl" value={selectedCategory} onChange={e => {setSelectedCategory(e.target.value); setSelectedProductName(''); setSelectedProductId('');}}>
+              <option value="">-- Lọc Ngành hàng --</option>
+              {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <select className="w-full p-2.5 border rounded-xl" value={selectedBrand} onChange={e => {setSelectedBrand(e.target.value); setSelectedProductName(''); setSelectedProductId('');}}>
+              <option value="">-- Lọc Hãng --</option>
+              {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </div>
+          <select className="w-full p-2.5 border rounded-xl" value={selectedProductName} onChange={e => {setSelectedProductName(e.target.value); setSelectedProductId('');}}>
             <option value="" disabled>Chọn SP...</option>
-            {filteredProducts.map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
+            {uniqueProductNames.map(name => <option key={name} value={name}>{name}</option>)}
           </select>
+          {selectedProductName && (
+            <select className="w-full p-2.5 border rounded-xl" value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)}>
+              <option value="" disabled>Chi tiết SP...</option>
+              {availableDetails.map(p => (
+                <option key={p.product_id} value={p.product_id}>{p.product_details || 'Mặc định'}</option>
+              ))}
+            </select>
+          )}
         </div>
 
         <div className="flex gap-2 items-end">
@@ -570,46 +459,14 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
             + THÊM VÀO GIỎ
           </button>
           
-          <button 
-            onClick={() => fileInputRef.current?.click()} 
-            disabled={isScanning || !selectedShopId}
-            className="flex-1 bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-          >
-            <Camera size={20} />
-            {isScanning ? 'ĐANG QUÉT...' : 'QUÉT BILL'}
-          </button>
-          <input 
-            type="file" 
-            accept="image/*" 
-            capture="environment" 
-            ref={fileInputRef} 
-            onChange={handleScanBill} 
-            className="hidden" 
+          <Scanbill 
+            products={products} 
+            productAliases={productAliases} 
+            onScanComplete={handleScanComplete} 
+            disabled={!selectedShopId} 
           />
         </div>
       </div>
-
-      {/* MODAL TIẾN TRÌNH QUÉT BILL */}
-      {isScanning && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 flex flex-col items-center text-center">
-            <div className="w-16 h-16 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mb-4">
-              <Camera size={32} className="animate-pulse" />
-            </div>
-            <h3 className="text-lg font-bold text-gray-900 mb-2">Đang xử lý hóa đơn</h3>
-            <div className="w-full flex justify-between text-sm font-medium text-purple-800 mb-2">
-              <span>{scanStatus}</span>
-              <span>{scanProgress}%</span>
-            </div>
-            <div className="w-full bg-purple-100 rounded-full h-3 overflow-hidden">
-              <div 
-                className="bg-purple-600 h-3 rounded-full transition-all duration-300 ease-out" 
-                style={{ width: `${scanProgress}%` }}
-              ></div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* HIỂN THỊ GIỎ HÀNG */}
       {cart.length > 0 && (
@@ -619,6 +476,7 @@ Trả về mảng JSON chứa 'product_name' (tên sản phẩm trên hóa đơn
               <li key={idx} className="flex justify-between items-center text-sm border-b border-gray-100 pb-3 last:border-0 last:pb-0">
                 <div className="flex flex-col pr-2">
                   <span className="font-medium text-gray-800">{item.qty}x {item.product_name}</span>
+                  {item.product_details && <span className="text-xs text-gray-500">{item.product_details}</span>}
                   {item.switched_from_brand && <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded w-fit mt-1">Đổi từ: {item.switched_from_brand}</span>}
                 </div>
                 <div className="flex items-center space-x-3">

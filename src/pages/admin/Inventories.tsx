@@ -175,183 +175,147 @@ export default function Inventories() {
 
   return (
     <div className="space-y-6">
-      <div className="sm:flex sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Inventories</h2>
-        <button
-          onClick={handleAdd}
-          className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 sm:w-auto"
+
+  {/* 🔥 STATS */}
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div className="bg-white p-4 rounded-xl shadow-sm border">
+      <p className="text-sm text-gray-500">Tổng sản phẩm</p>
+      <p className="text-2xl font-bold">{inventories.length}</p>
+    </div>
+
+    <div className="bg-white p-4 rounded-xl shadow-sm border">
+      <p className="text-sm text-gray-500">Tổng tồn kho</p>
+      <p className="text-2xl font-bold">
+        {inventories.reduce((sum, i) => sum + i.quantity, 0)}
+      </p>
+    </div>
+
+    <div className="bg-white p-4 rounded-xl shadow-sm border">
+      <p className="text-sm text-gray-500">Sắp hết</p>
+      <p className="text-2xl font-bold text-red-500">
+        {inventories.filter(i => i.quantity < 10).length}
+      </p>
+    </div>
+
+    <div className="bg-white p-4 rounded-xl shadow-sm border">
+      <p className="text-sm text-gray-500">Ổn định</p>
+      <p className="text-2xl font-bold text-green-600">
+        {inventories.filter(i => i.quantity >= 50).length}
+      </p>
+    </div>
+  </div>
+
+  {/* 🔍 SEARCH đẹp hơn */}
+  <div className="relative">
+    <input
+      type="text"
+      placeholder="Tìm SUP hoặc sản phẩm..."
+      className="w-full pl-10 pr-4 py-2 border rounded-lg shadow-sm focus:ring-2 focus:ring-indigo-500"
+      value={searchQuery}
+      onChange={(e) => setSearchQuery(e.target.value)}
+    />
+    <span className="absolute left-3 top-2.5 text-gray-400">🔍</span>
+  </div>
+
+  {/* 🧱 CARD GRID */}
+  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+    {filteredInventories.map((inventory) => {
+      
+      const status =
+        inventory.quantity < 10
+          ? { label: 'Sắp hết', color: 'red' }
+          : inventory.quantity < 50
+          ? { label: 'Trung bình', color: 'yellow' }
+          : { label: 'Còn nhiều', color: 'green' };
+
+      return (
+        <div
+          key={inventory.id}
+          className="bg-white p-5 rounded-xl shadow-sm border hover:shadow-lg transition-all duration-200"
         >
-          <Plus className="-ml-1 mr-2 h-5 w-5" />
-          Thêm Inventory
-        </button>
-      </div>
+          {/* HEADER */}
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="font-semibold text-gray-900">
+                {inventory.products?.product_name}
+              </h3>
+              <p className="text-sm text-gray-400">
+                {inventory.profiles?.full_name}
+              </p>
+            </div>
 
-      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-        <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm tồn kho</label>
-          <input
-            type="text"
-            placeholder="Nhập tên SUP hoặc sản phẩm..."
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="w-full sm:w-48">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo SUP</label>
-          <select
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
-            value={selectedSupFilter}
-            onChange={(e) => setSelectedSupFilter(e.target.value)}
-          >
-            <option value="">Tất cả SUP</option>
-            {profiles.map((p: any) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-          </select>
-        </div>
-        <div className="w-full sm:w-48">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Sản phẩm</label>
-          <select
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
-            value={selectedProductFilter}
-            onChange={(e) => setSelectedProductFilter(e.target.value)}
-          >
-            <option value="">Tất cả Sản phẩm</option>
-            {products.map((p: any) => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
-          </select>
-        </div>
-      </div>
+            {/* BADGE */}
+            <span
+              className={`text-xs px-2 py-1 rounded-full ${
+                status.color === 'red'
+                  ? 'bg-red-100 text-red-600'
+                  : status.color === 'yellow'
+                  ? 'bg-yellow-100 text-yellow-600'
+                  : 'bg-green-100 text-green-600'
+              }`}
+            >
+              {status.label}
+            </span>
+          </div>
 
-      <div className="mt-8 flex flex-col">
-        <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
-          <div className="inline-block min-w-full py-2 align-middle md:px-6 lg:px-8">
-            <div className="overflow-hidden shadow ring-1 ring-black ring-opacity-5 md:rounded-lg">
-              <table className="min-w-full divide-y divide-gray-300">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">SUP</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Sản phẩm</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Số lượng</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Cập nhật lần cuối</th>
-                    <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Thao tác</span></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredInventories.map((inventory) => (
-                    <tr key={inventory.id}>
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{inventory.profiles?.full_name}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{inventory.products?.product_name}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{inventory.quantity}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{new Date(inventory.last_updated).toLocaleString()}</td>
-                      <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                        <button onClick={() => handleEdit(inventory)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
-                        <button onClick={() => handleDelete(inventory.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {filteredInventories.length === 0 && (
-                    <tr>
-                      <td colSpan={5} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                        Không tìm thấy dữ liệu tồn kho nào.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+          {/* QUANTITY */}
+          <div className="mt-4">
+            <p className="text-3xl font-bold text-gray-800">
+              {inventory.quantity}
+            </p>
+          </div>
+
+          {/* PROGRESS */}
+          <div className="mt-3">
+            <div className="w-full bg-gray-200 h-2 rounded-full">
+              <div
+                className={`h-2 rounded-full ${
+                  status.color === 'red'
+                    ? 'bg-red-500'
+                    : status.color === 'yellow'
+                    ? 'bg-yellow-500'
+                    : 'bg-green-500'
+                }`}
+                style={{
+                  width: `${Math.min(inventory.quantity, 100)}%`
+                }}
+              />
+            </div>
+          </div>
+
+          {/* FOOTER */}
+          <div className="mt-4 flex justify-between items-center text-xs text-gray-400">
+            <span>
+              {new Date(inventory.last_updated).toLocaleString()}
+            </span>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => handleEdit(inventory)}
+                className="text-indigo-500 hover:scale-110 transition"
+              >
+                <Edit2 size={16} />
+              </button>
+
+              <button
+                onClick={() => handleDelete(inventory.id)}
+                className="text-red-500 hover:scale-110 transition"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           </div>
         </div>
-      </div>
+      );
+    })}
+  </div>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={isAdding ? 'Thêm Inventory' : 'Sửa Inventory'}>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">SUP</label>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
-              value={editForm.sup_id || ''}
-              onChange={e => setEditForm({...editForm, sup_id: e.target.value})}
-            >
-              <option value="">Chọn SUP</option>
-              {profiles.map((p: any) => (
-                <option key={p.id} value={p.id}>{p.full_name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Nhãn hàng</label>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
-              value={selectedModalBrand}
-              onChange={e => {
-                setSelectedModalBrand(e.target.value);
-                setEditForm({...editForm, product_id: ''}); // Reset product when brand changes
-              }}
-            >
-              <option value="">-- Tất cả nhãn hàng --</option>
-              {brands.map((b: any) => (
-                <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Sản phẩm</label>
-            <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
-              value={editForm.product_id || ''}
-              onChange={e => setEditForm({...editForm, product_id: e.target.value})}
-            >
-              <option value="">Chọn Sản phẩm</option>
-              {products
-                .filter((p: any) => selectedModalBrand === '' || p.brand_id === selectedModalBrand)
-                .map((p: any) => (
-                <option key={p.product_id} value={p.product_id}>{p.product_name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Số lượng</label>
-            <input 
-              type="number" 
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
-              value={editForm.quantity || 0} 
-              onChange={e => setEditForm({...editForm, quantity: Number(e.target.value)})} 
-            />
-          </div>
-          <div className="flex justify-end space-x-3 mt-6">
-            <button 
-              onClick={() => setIsModalOpen(false)} 
-              disabled={isSaving}
-              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              Hủy
-            </button>
-            {isAdding && (
-              <button 
-                onClick={() => handleSave(true)} 
-                disabled={isSaving}
-                className="rounded-md border border-transparent bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-              >
-                {isSaving ? 'Đang lưu...' : 'Lưu & Thêm tiếp'}
-              </button>
-            )}
-            <button 
-              onClick={() => handleSave(false)} 
-              disabled={isSaving}
-              className="rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {isSaving ? 'Đang lưu...' : 'Lưu'}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      <ConfirmModal
-        isOpen={!!deleteId}
-        onClose={() => setDeleteId(null)}
-        onConfirm={confirmDelete}
-        title="Xóa Inventory"
-        message="Bạn có chắc chắn muốn xóa inventory này không? Hành động này không thể hoàn tác."
-      />
+  {/* EMPTY */}
+  {filteredInventories.length === 0 && (
+    <div className="text-center text-gray-400 py-10">
+      Không có dữ liệu tồn kho 😢
     </div>
+  )}
+</div>
   );
 }
