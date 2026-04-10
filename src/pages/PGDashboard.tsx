@@ -60,6 +60,13 @@ export default function PGDashboard() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [applicableGifts, setApplicableGifts] = useState<any[]>([]);
   
+  // State cho thông tin khách hàng & Bill
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [billImage, setBillImage] = useState<File | null>(null);
+  const [billPreview, setBillPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
   // State cho OCR Learning
   const [pendingOcrItems, setPendingOcrItems] = useState<PendingOcrItem[]>([]);
   const [showOcrModal, setShowOcrModal] = useState(false);
@@ -81,7 +88,7 @@ export default function PGDashboard() {
     queryKey: ['pg_shops', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data } = await supabase.from('schedules').select('shop_id, shops(shop_name)').eq('pg_id', user.id);
+      const { data } = await supabase.from('schedules').select('shop_id, program_id, shops(shop_name)').eq('pg_id', user.id);
       const uniqueShops = new Map();
       data?.forEach((item: any) => { if (item.shop_id) uniqueShops.set(item.shop_id, item); });
       return Array.from(uniqueShops.values());
@@ -205,9 +212,16 @@ export default function PGDashboard() {
 
   // 4. Lấy dữ liệu Khuyến mãi
   const { data: activePromotions = [] } = useQuery({
-    queryKey: ['active_promotions', selectedShopId],
+    queryKey: ['active_promotions', selectedShopId, shops],
     queryFn: async () => {
-      const { data: promos } = await supabase.from('promotions').select('*');
+      const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
+      if (!selectedSchedule?.program_id) return [];
+
+      const { data: promos } = await supabase
+        .from('promotions')
+        .select('*')
+        .eq('program_id', selectedSchedule.program_id);
+        
       if (!promos) return [];
       
       return await Promise.all(promos.map(async (p) => {
@@ -218,7 +232,8 @@ export default function PGDashboard() {
         }));
         return { ...p, tiers: tiersWithConditions };
       }));
-    }
+    },
+    enabled: !!selectedShopId && shops.length > 0,
   });
 
   // 5. Lấy tồn kho hiện tại của cửa hàng
@@ -437,44 +452,90 @@ export default function PGDashboard() {
   }, [cart, cartTotal, activePromotions, products, selectedShopId]);
 
 
-  // --- MUTATION: LƯU DB (SỬ DỤNG RPC) ---
+  // --- MUTATION: LƯU DB (SỬ DỤNG RPC VỚI HEADER-DETAIL) ---
   const submitOrderMutation = useMutation({
     mutationFn: async () => {
-      // 1. Tạo Cart ID
-      const { data: finalCartId, error: idError } = await supabase.rpc('generate_cart_id');
-      if (idError) throw idError;
+      if (!selectedShopId) throw new Error('Vui lòng chọn cửa hàng');
+      if (!billImage) throw new Error('Vui lòng chụp ảnh hóa đơn');
+
+      // 1. Lấy vị trí hiện tại
+      const getCoords = () => new Promise<{lat: number, lng: number}>((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          () => resolve({ lat: 0, lng: 0 }),
+          { timeout: 5000 }
+        );
+      });
+      const coords = await getCoords();
+
+      // 2. Tạo Cart ID & Program ID
+      const { data: finalCartId } = await supabase.rpc('generate_cart_id');
+      const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
+      const programId = selectedSchedule?.program_id;
+
+      // 3. Upload ảnh lên Storage
+      const fileExt = billImage.name.split('.').pop();
+      const fileName = `${finalCartId}.${fileExt}`;
+      const filePath = `${programId}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('bills')
+        .upload(filePath, billImage);
       
-      // 2. Gom dữ liệu Sản phẩm bán
-      const sellItems = cart.map(item => ({
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(filePath);
+
+      // 4. Chuẩn bị Header
+      const header = {
         cart_id: finalCartId,
         pg_id: user?.id,
+        program_id: programId,
+        shop_id: selectedShopId,
+        bill_image_url: publicUrl,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        customer_name: customerName,
+        customer_phone: customerPhone
+      };
+
+      // 5. Chuẩn bị Details
+      const sellItems = cart.map(item => ({
         product_id: item.product_id,
         qty: item.qty,
         net_value: item.net_value,
+        promotion_id: null, // Sẽ bổ sung nếu có logic gán promo cho từng dòng
+        is_gift: false,
         switched_from_brand: item.switched_from_brand
       }));
 
-      // 3. Gom dữ liệu Quà tặng
       const giftItems = applicableGifts.map(gift => ({
-        cart_id: finalCartId,
-        pg_id: user?.id,
         product_id: gift.product_id,
         qty: gift.qty,
         net_value: 0,
-        switched_from_brand: `QUÀ TẶNG: ${gift.tier_name}` 
+        promotion_id: null, // Có thể lưu tier_id vào đây
+        is_gift: true,
+        switched_from_brand: `QUÀ TẶNG: ${gift.tier_name}`
       }));
 
-      // Gộp chung 
-      const jsonPayload = [...sellItems, ...giftItems];
+      const details = [...sellItems, ...giftItems];
 
-      // 4. Đẩy xuống Database xử lý Insert + Trừ kho
-      const { error: submitError } = await supabase.rpc('luu_don_hang', { p_cart_items: jsonPayload });
+      // 6. Gọi RPC thực hiện Transaction
+      const { error: submitError } = await supabase.rpc('create_order_transaction', { 
+        p_header: header, 
+        p_details: details 
+      });
+
       if (submitError) throw submitError;
     },
     onSuccess: () => {
-      toast.success('🎉 Đã ghi nhận hóa đơn và trừ kho thành công!');
+      toast.success('🎉 Đã lưu đơn hàng và tải ảnh thành công!');
       setCart([]);
       setApplicableGifts([]);
+      setCustomerName('');
+      setCustomerPhone('');
+      setBillImage(null);
+      setBillPreview(null);
       queryClient.invalidateQueries({ queryKey: ['todaySales'] }); 
     },
     onError: (error: any) => toast.error(`Lỗi: ${error.message}`)
@@ -578,6 +639,62 @@ export default function PGDashboard() {
           <div className="border-t border-gray-200 pt-3 flex justify-between items-center font-bold text-lg text-indigo-700">
             <span>Tổng giỏ hàng:</span>
             <span className="text-xl">{new Intl.NumberFormat('vi-VN').format(cartTotal)}đ</span>
+          </div>
+
+          {/* THÔNG TIN KHÁCH HÀNG & CHỤP BILL */}
+          <div className="mt-6 space-y-4 border-t border-dashed border-gray-200 pt-4">
+            <div className="grid grid-cols-2 gap-3">
+              <input 
+                type="text" 
+                placeholder="Tên khách hàng" 
+                className="p-2.5 border rounded-xl text-sm" 
+                value={customerName} 
+                onChange={e => setCustomerName(e.target.value)} 
+              />
+              <input 
+                type="tel" 
+                placeholder="Số điện thoại" 
+                className="p-2.5 border rounded-xl text-sm" 
+                value={customerPhone} 
+                onChange={e => setCustomerPhone(e.target.value)} 
+              />
+            </div>
+
+            <div className="relative">
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment" 
+                className="hidden" 
+                ref={fileInputRef}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    setBillImage(file);
+                    setBillPreview(URL.createObjectURL(file));
+                  }
+                }}
+              />
+              {billPreview ? (
+                <div className="relative rounded-xl overflow-hidden border-2 border-indigo-500">
+                  <img src={billPreview} alt="Bill Preview" className="w-full h-40 object-cover" />
+                  <button 
+                    onClick={() => {setBillImage(null); setBillPreview(null);}}
+                    className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full py-8 border-2 border-dashed border-indigo-200 rounded-xl flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30"
+                >
+                  <Camera className="w-8 h-8 mb-2" />
+                  <span className="text-sm font-medium">Chụp ảnh hóa đơn (Bắt buộc)</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {/* KHU VỰC HIỂN THỊ QUÀ TẶNG */}
