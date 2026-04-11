@@ -753,7 +753,18 @@ export default function PGDashboard() {
             
             <div className="p-4 overflow-y-auto flex-1 space-y-4">
               {pendingOcrItems.map((item, idx) => (
-                <div key={idx} className="bg-gray-50 p-3 rounded-xl border border-gray-200">
+                <div key={idx} className="bg-gray-50 p-3 rounded-xl border border-gray-200 relative group">
+                  <button 
+                    onClick={() => {
+                      const newItems = pendingOcrItems.filter((_, i) => i !== idx);
+                      setPendingOcrItems(newItems);
+                      if (newItems.length === 0) setShowOcrModal(false);
+                    }}
+                    className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg transition-all active:scale-90"
+                    title="Xóa sản phẩm này"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
                   <div className="flex justify-between items-start mb-2">
                     <div>
                       <span className="text-xs font-semibold text-gray-500 uppercase">Tên trên bill:</span>
