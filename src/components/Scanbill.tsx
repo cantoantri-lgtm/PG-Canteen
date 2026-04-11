@@ -35,11 +35,12 @@ interface PendingOcrItem {
 interface ScanbillProps {
   products: Product[];
   productAliases: any[];
+  ocrErrors?: any[];
   onScanComplete: (newCartItems: CartItem[], newPendingItems: PendingOcrItem[], imageFile: File) => void;
   disabled?: boolean;
 }
 
-export default function Scanbill({ products, productAliases, onScanComplete, disabled }: ScanbillProps) {
+export default function Scanbill({ products, productAliases, ocrErrors = [], onScanComplete, disabled }: ScanbillProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
@@ -157,6 +158,27 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
         }
 
         const matchResult = matchProduct(item.raw_name, item.unit_price, products, productAliases);
+
+        // Lọc bỏ các gợi ý đã được xác nhận là sai 2 lần trở lên
+        if (matchResult.product_id) {
+          const isConfirmedError = ocrErrors.some(err => 
+            err.raw_name.toLowerCase() === item.raw_name.trim().toLowerCase() && 
+            err.suggested_product_id === matchResult.product_id
+          );
+          if (isConfirmedError) {
+            matchResult.product_id = null;
+            matchResult.matchType = 'none';
+          }
+        }
+
+        if (matchResult.suggestions && matchResult.suggestions.length > 0) {
+          matchResult.suggestions = matchResult.suggestions.filter(sugg => {
+            return !ocrErrors.some(err => 
+              err.raw_name.toLowerCase() === item.raw_name.trim().toLowerCase() && 
+              err.suggested_product_id === sugg.product_id
+            );
+          });
+        }
 
         if (matchResult.matchType === 'exact' || matchResult.matchType === 'fuzzy_high') {
           const matchedProduct = products.find(p => p.product_id === matchResult.product_id);

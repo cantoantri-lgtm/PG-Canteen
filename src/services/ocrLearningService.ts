@@ -207,3 +207,61 @@ export const learnAlias = async (extracted_name: string, final_product_id: strin
     return false;
   }
 };
+
+/**
+ * Ghi nhận các trường hợp OCR sai hoặc PG bác bỏ gợi ý
+ * @param raw_name Tên trích xuất từ bill
+ * @param suggested_id ID sản phẩm AI đã gợi ý (nếu có)
+ * @param pg_id ID của nhân viên PG
+ * @param price Giá trên bill
+ * @param qty Số lượng trên bill
+ */
+export const logOcrError = async (raw_name: string, suggested_id: string | null, pg_id: string, price: number, qty: number) => {
+  try {
+    const normalizedName = raw_name.trim().toLowerCase();
+    
+    // Kiểm tra xem lỗi này đã từng tồn tại chưa
+    const { data: existingError } = await supabase
+      .from('ocr_errors')
+      .select('id, confirmed_error_count')
+      .eq('raw_name', normalizedName)
+      .eq('suggested_product_id', suggested_id)
+      .maybeSingle();
+
+    if (existingError) {
+      // Nếu đã tồn tại, tăng số lần xác nhận sai
+      await supabase
+        .from('ocr_errors')
+        .update({ 
+          confirmed_error_count: (existingError.confirmed_error_count || 1) + 1,
+          last_reported_at: new Date().toISOString()
+        })
+        .eq('id', existingError.id);
+    } else {
+      // Nếu chưa có, tạo mới
+      const { error } = await supabase
+        .from('ocr_errors')
+        .insert({
+          raw_name: normalizedName,
+          suggested_product_id: suggested_id,
+          pg_id: pg_id,
+          price: price || 0,
+          qty: qty || 1,
+          confirmed_error_count: 1,
+          created_at: new Date().toISOString()
+        });
+      
+      if (error) {
+        if (error.message.includes('relation "ocr_errors" does not exist')) {
+          console.warn('Bảng ocr_errors chưa được tạo trong Database.');
+        } else {
+          throw error;
+        }
+      }
+    }
+    return true;
+  } catch (error) {
+    console.error('Lỗi khi ghi nhận lỗi OCR (logOcrError):', error);
+    return false;
+  }
+};

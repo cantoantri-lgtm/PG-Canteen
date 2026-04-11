@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Camera, Check, X } from 'lucide-react';
-import { matchProduct, learnAlias } from '../services/ocrLearningService';
+import { matchProduct, learnAlias, logOcrError } from '../services/ocrLearningService';
 import Scanbill from '../components/Scanbill';
 
 interface Product {
@@ -198,6 +198,18 @@ export default function PGDashboard() {
     staleTime: 1000 * 60 * 60, // 1 tiếng
   });
 
+  const { data: ocrErrors = [] } = useQuery({
+    queryKey: ['ocr_errors'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('ocr_errors')
+        .select('raw_name, suggested_product_id')
+        .gte('confirmed_error_count', 2);
+      if (error) return [];
+      return data;
+    }
+  });
+
   // 3. Lấy Doanh số hôm nay (Từ SQL View)
   const { data: todaySales = 0 } = useQuery({
     queryKey: ['todaySales', user?.id],
@@ -370,6 +382,9 @@ export default function PGDashboard() {
               switched_from_brand: null
            });
          }
+      } else {
+        // Nếu PG chọn "Bỏ qua sản phẩm này" -> Ghi nhận lỗi OCR
+        await logOcrError(pending.original_name, null, user?.id || '', pending.price || 0, pending.qty);
       }
     }
     
@@ -485,12 +500,17 @@ export default function PGDashboard() {
         const filePath = `${programId}/${fileName}`;
 
         const { error: uploadError } = await supabase.storage
-          .from('bills')
+          .from('Bills')
           .upload(filePath, file);
         
-        if (uploadError) throw uploadError;
+        if (uploadError) {
+          if (uploadError.message.includes('Bucket not found')) {
+            throw new Error('Lỗi: Chưa tạo bucket "Bills" trong Supabase Storage. Vui lòng tạo bucket tên "Bills" (chế độ Public) để tải ảnh hóa đơn.');
+          }
+          throw uploadError;
+        }
 
-        const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(filePath);
+        const { data: { publicUrl } } = supabase.storage.from('Bills').getPublicUrl(filePath);
         return publicUrl;
       });
 
@@ -622,6 +642,7 @@ export default function PGDashboard() {
           <Scanbill 
             products={products} 
             productAliases={productAliases} 
+            ocrErrors={ocrErrors}
             onScanComplete={handleScanComplete} 
             disabled={!selectedShopId} 
           />
@@ -786,7 +807,10 @@ export default function PGDashboard() {
               {pendingOcrItems.map((item, idx) => (
                 <div key={idx} className="bg-gray-50 p-3 rounded-xl border border-gray-200 relative group">
                   <button 
-                    onClick={() => {
+                    onClick={async () => {
+                      // Ghi nhận lỗi OCR khi PG chủ động xóa
+                      await logOcrError(item.original_name, item.selected_product_id || null, user?.id || '', item.price || 0, item.qty);
+                      
                       const newItems = pendingOcrItems.filter((_, i) => i !== idx);
                       setPendingOcrItems(newItems);
                       if (newItems.length === 0) setShowOcrModal(false);
