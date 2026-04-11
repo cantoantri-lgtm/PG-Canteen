@@ -28,16 +28,38 @@ export default function PGReport() {
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedPgId, setSelectedPgId] = useState<string>(isAdmin ? '' : (user?.id || ''));
+  const [selectedManagerId, setSelectedManagerId] = useState<string>('');
 
-  // Fetch profiles for admin to select
-  const { data: profiles = [] } = useQuery({
-    queryKey: ['profiles'],
+  // Fetch all profiles for admin/manager filtering
+  const { data: allProfiles = [] } = useQuery({
+    queryKey: ['all_profiles'],
     queryFn: async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name').eq('admin_role', false).order('full_name');
+      const { data } = await supabase.from('profiles').select('id, full_name, manager_id, admin_role').order('full_name');
       return data || [];
-    },
-    enabled: isAdmin,
+    }
   });
+
+  const managers = useMemo(() => {
+    return allProfiles.filter(p => allProfiles.some(sub => sub.manager_id === p.id));
+  }, [allProfiles]);
+
+  const filteredProfiles = useMemo(() => {
+    if (isAdmin) {
+      if (selectedManagerId) {
+        return allProfiles.filter(p => p.manager_id === selectedManagerId && !p.admin_role);
+      }
+      return allProfiles.filter(p => !p.admin_role);
+    }
+    // Nếu là quản lý (nhưng không phải admin)
+    const managed = allProfiles.filter(p => p.manager_id === user?.id);
+    if (managed.length > 0) {
+      return managed;
+    }
+    return [];
+  }, [allProfiles, isAdmin, selectedManagerId, user?.id]);
+
+  const isManager = !isAdmin && allProfiles.some(p => p.manager_id === user?.id);
+  const canSelectPg = isAdmin || isManager;
 
   // Fetch orders for the selected PG and month
   const { data: orders = [], isLoading: loadingOrders } = useQuery({
@@ -93,8 +115,8 @@ export default function PGReport() {
   const reportData = useMemo(() => {
     if (!selectedPgId) return null;
 
-    const pgName = isAdmin 
-      ? profiles.find(p => p.id === selectedPgId)?.full_name || 'Không xác định'
+    const pgName = (isAdmin || isManager)
+      ? allProfiles.find(p => p.id === selectedPgId)?.full_name || 'Không xác định'
       : user?.full_name || 'Không xác định';
 
     // Lọc đơn hàng của đúng ngày được chọn
@@ -155,7 +177,7 @@ export default function PGReport() {
       conversionRate,
       tableData
     };
-  }, [selectedPgId, selectedDate, orders, kpis, profiles, isAdmin, user]);
+  }, [selectedPgId, selectedDate, orders, kpis, allProfiles, isAdmin, isManager, user]);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
@@ -164,8 +186,27 @@ export default function PGReport() {
       </div>
 
       <div className="bg-white shadow rounded-lg p-6 border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {isAdmin && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Quản lý</label>
+              <select 
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                value={selectedManagerId}
+                onChange={(e) => {
+                  setSelectedManagerId(e.target.value);
+                  setSelectedPgId('');
+                }}
+              >
+                <option value="">-- Tất cả Quản lý --</option>
+                {managers.map(m => (
+                  <option key={m.id} value={m.id}>{m.full_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {canSelectPg && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Chọn Nhân viên PG</label>
               <select 
@@ -174,14 +215,14 @@ export default function PGReport() {
                 onChange={(e) => setSelectedPgId(e.target.value)}
               >
                 <option value="">-- Chọn PG --</option>
-                {profiles.map(p => (
+                {filteredProfiles.map(p => (
                   <option key={p.id} value={p.id}>{p.full_name}</option>
                 ))}
               </select>
             </div>
           )}
           
-          <div>
+          <div className={!canSelectPg ? "md:col-span-2" : ""}>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ngày báo cáo</label>
             <input 
               type="date" 

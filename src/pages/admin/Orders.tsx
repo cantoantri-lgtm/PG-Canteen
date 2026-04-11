@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Edit2, Trash2, Download } from 'lucide-react';
+import { Plus, Edit2, Trash2, Download, Eye } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation } from '@tanstack/react-query';
@@ -35,6 +35,11 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPgFilter, setSelectedPgFilter] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
+  
+  // State cho xem ảnh Bill
+  const [viewingBillImages, setViewingBillImages] = useState<string[] | null>(null);
+  const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [loadingBill, setLoadingBill] = useState(false);
   
   // State mới cho đối thủ & Giỏ hàng Admin
   const [isConverted, setIsConverted] = useState(false);
@@ -219,6 +224,48 @@ export default function Orders() {
     }
   };
 
+  const handleViewBill = async (cartId: string) => {
+    setLoadingBill(true);
+    setIsBillModalOpen(true);
+    try {
+      // Thử lấy từ order_headers (theo mô tả ban đầu của người dùng)
+      const { data, error } = await supabase
+        .from('order_headers')
+        .select('bill_image_url')
+        .eq('cart_id', cartId)
+        .single();
+      
+      if (error) {
+        // Nếu không có order_headers, thử tìm trong chính bảng orders (đề phòng schema phẳng)
+        const { data: orderData, error: orderError } = await supabase
+          .from('orders')
+          .select('bill_image_url')
+          .eq('cart_id', cartId)
+          .not('bill_image_url', 'is', null)
+          .limit(1)
+          .single();
+          
+        if (orderError || !orderData?.bill_image_url) {
+          setViewingBillImages([]);
+          toast.error("Không tìm thấy ảnh hóa đơn cho đơn hàng này.");
+        } else {
+          setViewingBillImages(orderData.bill_image_url.split(','));
+        }
+      } else if (data?.bill_image_url) {
+        setViewingBillImages(data.bill_image_url.split(','));
+      } else {
+        setViewingBillImages([]);
+        toast.error("Đơn hàng này không có ảnh hóa đơn.");
+      }
+    } catch (err) {
+      console.error("Lỗi khi tải ảnh bill:", err);
+      toast.error("Lỗi khi tải ảnh hóa đơn.");
+      setViewingBillImages([]);
+    } finally {
+      setLoadingBill(false);
+    }
+  };
+
   const filteredProducts = products.filter(p => !selectedBrandId || p.brand_id === selectedBrandId);
 
   // --- XUẤT CSV ---
@@ -352,6 +399,7 @@ export default function Orders() {
                         )}
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                        <button onClick={() => handleViewBill(order.cart_id)} className="text-blue-600 hover:text-blue-900 mr-4" title="Xem hóa đơn"><Eye className="h-4 w-4" /></button>
                         <button onClick={() => handleEdit(order)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
                         <button onClick={() => setDeleteId(order.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
                       </td>
@@ -483,6 +531,50 @@ export default function Orders() {
         title="Xóa Sản phẩm"
         message="Bạn có chắc chắn muốn xóa sản phẩm này khỏi hệ thống không? Doanh thu của PG sẽ bị trừ đi tương ứng."
       />
+
+      {/* MODAL XEM ẢNH BILL */}
+      <Modal 
+        isOpen={isBillModalOpen} 
+        onClose={() => { setIsBillModalOpen(false); setViewingBillImages(null); }} 
+        title="Ảnh hóa đơn (Bill Images)"
+      >
+        <div className="space-y-4">
+          {loadingBill ? (
+            <div className="flex flex-col items-center justify-center py-10 space-y-3">
+              <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+              <p className="text-sm text-gray-500">Đang tải ảnh hóa đơn...</p>
+            </div>
+          ) : viewingBillImages && viewingBillImages.length > 0 ? (
+            <div className="grid grid-cols-1 gap-4">
+              {viewingBillImages.map((url, idx) => (
+                <div key={idx} className="rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                  <img 
+                    src={url} 
+                    alt={`Bill ${idx + 1}`} 
+                    className="w-full h-auto object-contain max-h-[70vh]" 
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="bg-gray-50 p-2 text-center text-xs text-gray-500 border-t border-gray-100">
+                    Ảnh {idx + 1} / {viewingBillImages.length}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-10 text-gray-500">
+              Không tìm thấy ảnh hóa đơn cho đơn hàng này.
+            </div>
+          )}
+          <div className="flex justify-end mt-4">
+            <button 
+              onClick={() => { setIsBillModalOpen(false); setViewingBillImages(null); }} 
+              className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+            >
+              Đóng
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

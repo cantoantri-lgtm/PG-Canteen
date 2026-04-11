@@ -63,8 +63,8 @@ export default function PGDashboard() {
   // State cho thông tin khách hàng & Bill
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
-  const [billImage, setBillImage] = useState<File | null>(null);
-  const [billPreview, setBillPreview] = useState<string | null>(null);
+  const [billImages, setBillImages] = useState<File[]>([]);
+  const [billPreviews, setBillPreviews] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // State cho OCR Learning
@@ -236,23 +236,24 @@ export default function PGDashboard() {
     enabled: !!selectedShopId && shops.length > 0,
   });
 
-  // 5. Lấy tồn kho hiện tại của cửa hàng
+  // 5. Lấy tồn kho hiện tại của cửa hàng (Chỉ lấy của người quản lý trực tiếp)
   const { data: inventoryData = [] } = useQuery({
-    queryKey: ['shop_inventory', selectedShopId],
+    queryKey: ['shop_inventory', selectedShopId, user?.manager_id],
     queryFn: async () => {
-      if (!selectedShopId) return [];
-      // Assuming inventory is tracked per shop. If it's tracked globally, remove the eq('shop_id')
-      // If there's no shop_id in inventories, we might need to adjust this logic based on actual schema
+      if (!selectedShopId || !user?.manager_id) return [];
+      
       const { data, error } = await supabase
         .from('inventories')
-        .select('product_id, quantity');
+        .select('product_id, quantity')
+        .eq('sup_id', user.manager_id);
+        
       if (error) {
         console.error('Lỗi tải tồn kho:', error);
         return [];
       }
       return data;
     },
-    enabled: !!selectedShopId,
+    enabled: !!selectedShopId && !!user?.manager_id,
   });
 
   // --- USE EFFECTS LÀM MƯỢT FORM ---
@@ -329,7 +330,11 @@ export default function PGDashboard() {
 
   const cartTotal = cart.reduce((sum, item) => sum + item.net_value, 0);
 
-  const handleScanComplete = (newCartItems: CartItem[], newPendingItems: PendingOcrItem[]) => {
+  const handleScanComplete = (newCartItems: CartItem[], newPendingItems: PendingOcrItem[], imageFile: File) => {
+    // Thêm ảnh vào danh sách ảnh
+    setBillImages(prev => [...prev, imageFile]);
+    setBillPreviews(prev => [...prev, URL.createObjectURL(imageFile)]);
+
     if (newCartItems.length > 0) {
       setCart(prev => [...prev, ...newCartItems]);
       toast.success(`Đã tự động thêm ${newCartItems.length} sản phẩm vào giỏ hàng!`);
@@ -456,7 +461,7 @@ export default function PGDashboard() {
   const submitOrderMutation = useMutation({
     mutationFn: async () => {
       if (!selectedShopId) throw new Error('Vui lòng chọn cửa hàng');
-      if (!billImage) throw new Error('Vui lòng chụp ảnh hóa đơn');
+      if (billImages.length === 0) throw new Error('Vui lòng chụp ít nhất 1 ảnh hóa đơn');
 
       // 1. Lấy vị trí hiện tại
       const getCoords = () => new Promise<{lat: number, lng: number}>((resolve) => {
@@ -473,18 +478,24 @@ export default function PGDashboard() {
       const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
       const programId = selectedSchedule?.program_id;
 
-      // 3. Upload ảnh lên Storage
-      const fileExt = billImage.name.split('.').pop();
-      const fileName = `${finalCartId}.${fileExt}`;
-      const filePath = `${programId}/${fileName}`;
+      // 3. Upload tất cả ảnh lên Storage
+      const uploadPromises = billImages.map(async (file, index) => {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${finalCartId}_${index}.${fileExt}`;
+        const filePath = `${programId}/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('bills')
-        .upload(filePath, billImage);
-      
-      if (uploadError) throw uploadError;
+        const { error: uploadError } = await supabase.storage
+          .from('bills')
+          .upload(filePath, file);
+        
+        if (uploadError) throw uploadError;
 
-      const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(filePath);
+        const { data: { publicUrl } } = supabase.storage.from('bills').getPublicUrl(filePath);
+        return publicUrl;
+      });
+
+      const publicUrls = await Promise.all(uploadPromises);
+      const billImageUrlString = publicUrls.join(',');
 
       // 4. Chuẩn bị Header
       const header = {
@@ -492,7 +503,7 @@ export default function PGDashboard() {
         pg_id: user?.id,
         program_id: programId,
         shop_id: selectedShopId,
-        bill_image_url: publicUrl,
+        bill_image_url: billImageUrlString,
         latitude: coords.lat,
         longitude: coords.lng,
         customer_name: customerName,
@@ -534,8 +545,8 @@ export default function PGDashboard() {
       setApplicableGifts([]);
       setCustomerName('');
       setCustomerPhone('');
-      setBillImage(null);
-      setBillPreview(null);
+      setBillImages([]);
+      setBillPreviews([]);
       queryClient.invalidateQueries({ queryKey: ['todaySales'] }); 
     },
     onError: (error: any) => toast.error(`Lỗi: ${error.message}`)
@@ -660,32 +671,52 @@ export default function PGDashboard() {
               />
             </div>
 
-            <div className="relative">
+            <div className="space-y-3">
               <input 
                 type="file" 
                 accept="image/*" 
                 capture="environment" 
                 className="hidden" 
                 ref={fileInputRef}
+                multiple
                 onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    setBillImage(file);
-                    setBillPreview(URL.createObjectURL(file));
+                  const files = Array.from(e.target.files || []);
+                  if (files.length > 0) {
+                    setBillImages(prev => [...prev, ...files]);
+                    const newPreviews = files.map(file => URL.createObjectURL(file));
+                    setBillPreviews(prev => [...prev, ...newPreviews]);
                   }
                 }}
               />
-              {billPreview ? (
-                <div className="relative rounded-xl overflow-hidden border-2 border-indigo-500">
-                  <img src={billPreview} alt="Bill Preview" className="w-full h-40 object-cover" />
+              
+              {/* Grid hiển thị ảnh đã chọn */}
+              {billPreviews.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {billPreviews.map((url, idx) => (
+                    <div key={idx} className="relative rounded-lg overflow-hidden border border-gray-200 aspect-square group">
+                      <img src={url} alt={`Bill ${idx}`} className="w-full h-full object-cover" />
+                      <button 
+                        onClick={() => {
+                          setBillImages(prev => prev.filter((_, i) => i !== idx));
+                          setBillPreviews(prev => prev.filter((_, i) => i !== idx));
+                        }}
+                        className="absolute top-1 right-1 bg-red-500 text-white p-0.5 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
                   <button 
-                    onClick={() => {setBillImage(null); setBillPreview(null);}}
-                    className="absolute top-2 right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-indigo-200 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30 aspect-square"
                   >
-                    <X className="w-4 h-4" />
+                    <Camera className="w-5 h-5" />
+                    <span className="text-[10px] font-medium">Thêm ảnh</span>
                   </button>
                 </div>
-              ) : (
+              )}
+
+              {billPreviews.length === 0 && (
                 <button 
                   onClick={() => fileInputRef.current?.click()}
                   className="w-full py-8 border-2 border-dashed border-indigo-200 rounded-xl flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30"

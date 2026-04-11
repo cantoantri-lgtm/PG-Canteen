@@ -30,9 +30,15 @@ export default function Inventories() {
   const { data: profiles = [] } = useQuery({
     queryKey: ['profiles'],
     queryFn: async () => {
+      const { data: roles } = await supabase.from('roles').select('*');
       const { data, error } = await supabase.from('profiles').select('*').order('full_name');
       if (error) throw error;
-      return data;
+      
+      // Filter to only show Admin or SUP
+      return (data || []).filter(p => {
+        const roleName = roles?.find(r => r.role_id === p.role)?.role_name || '';
+        return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
+      });
     }
   });
 

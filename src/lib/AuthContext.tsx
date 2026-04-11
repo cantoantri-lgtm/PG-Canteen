@@ -10,6 +10,7 @@ export interface Profile {
   dob?: string;
   email?: string;
   login_pin?: string;
+  manager_id?: string;
 }
 
 interface AuthContextType {

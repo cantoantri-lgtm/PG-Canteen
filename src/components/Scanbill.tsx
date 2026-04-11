@@ -35,7 +35,7 @@ interface PendingOcrItem {
 interface ScanbillProps {
   products: Product[];
   productAliases: any[];
-  onScanComplete: (newCartItems: CartItem[], newPendingItems: PendingOcrItem[]) => void;
+  onScanComplete: (newCartItems: CartItem[], newPendingItems: PendingOcrItem[], imageFile: File) => void;
   disabled?: boolean;
 }
 
@@ -221,7 +221,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
         }
       }
 
-      onScanComplete(newCartItems, newPendingItems);
+      onScanComplete(newCartItems, newPendingItems, file);
       setIsScanning(false);
       
       if (fileInputRef.current) {

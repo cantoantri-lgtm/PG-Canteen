@@ -16,6 +16,7 @@ interface Profile {
   role?: string;
   email: string;
   login_pin: string;
+  manager_id?: string;
 }
 
 export default function Profiles() {
@@ -58,7 +59,10 @@ export default function Profiles() {
                            (p.email || '').toLowerCase().includes(searchQuery.toLowerCase());
       const matchesRole = selectedRoleFilter === '' || p.role === selectedRoleFilter;
       return matchesSearch && matchesRole;
-    });
+    }).map(p => ({
+      ...p,
+      manager_name: profiles.find(m => m.id === p.manager_id)?.full_name
+    }));
   }, [profiles, searchQuery, selectedRoleFilter]);
 
   const saveMutation = useMutation({
@@ -181,6 +185,7 @@ export default function Profiles() {
                   <tr>
                     <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Họ tên</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">SĐT</th>
+                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Quản lý</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Email</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Ngày sinh</th>
                     <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Vai trò</th>
@@ -192,6 +197,7 @@ export default function Profiles() {
                     <tr key={profile.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900">{profile.full_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.phone_number}</td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-indigo-600 font-medium">{profile.manager_name || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.email || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.dob || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
@@ -256,6 +262,28 @@ export default function Profiles() {
             <select className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" value={editForm.role || ''} onChange={e => setEditForm({...editForm, role: e.target.value})}>
               <option value="">-- Chọn vai trò --</option>
               {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Người quản lý</label>
+            <select 
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" 
+              value={editForm.manager_id || ''} 
+              onChange={e => setEditForm({...editForm, manager_id: e.target.value})}
+            >
+              <option value="">-- Không có quản lý --</option>
+              {profiles
+                .filter(p => p.id !== editForm.id) // Không tự quản lý chính mình
+                .filter(p => {
+                  const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
+                  return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
+                })
+                .map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.full_name} ({p.phone_number})
+                  </option>
+                ))
+              }
             </select>
           </div>
           <div className="flex items-center mt-4">

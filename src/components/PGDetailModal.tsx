@@ -1,7 +1,10 @@
-import React, { useMemo } from 'react';
-import { X } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { X, Eye } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { format } from 'date-fns';
+import { supabase } from '../lib/supabase';
+import { toast } from 'sonner';
+import Modal from './Modal';
 
 interface PGDetailModalProps {
   isOpen: boolean;
@@ -17,6 +20,50 @@ const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6'
 
 export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterData, kpi }: PGDetailModalProps) {
   const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
+
+  const [viewingBillImages, setViewingBillImages] = useState<string[] | null>(null);
+  const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [loadingBill, setLoadingBill] = useState(false);
+
+  const handleViewBill = async (cartId: string) => {
+    setLoadingBill(true);
+    setIsBillModalOpen(true);
+    try {
+      const { data, error } = await supabase
+        .from('order_headers')
+        .select('bill_image_url')
+        .eq('cart_id', cartId)
+        .single();
+      
+      if (error) {
+        const { data: orderData, error: orderError } = await supabase
+          .from('orders')
+          .select('bill_image_url')
+          .eq('cart_id', cartId)
+          .not('bill_image_url', 'is', null)
+          .limit(1)
+          .single();
+          
+        if (orderError || !orderData?.bill_image_url) {
+          setViewingBillImages([]);
+          toast.error("Không tìm thấy ảnh hóa đơn cho đơn hàng này.");
+        } else {
+          setViewingBillImages(orderData.bill_image_url.split(','));
+        }
+      } else if (data?.bill_image_url) {
+        setViewingBillImages(data.bill_image_url.split(','));
+      } else {
+        setViewingBillImages([]);
+        toast.error("Đơn hàng này không có ảnh hóa đơn.");
+      }
+    } catch (err) {
+      console.error("Lỗi khi tải ảnh bill:", err);
+      toast.error("Lỗi khi tải ảnh hóa đơn.");
+      setViewingBillImages([]);
+    } finally {
+      setLoadingBill(false);
+    }
+  };
 
   const data = useMemo(() => {
     if (!pgId || !orders || !masterData) return null;
@@ -153,6 +200,7 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
                     <th className="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">SL</th>
                     <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Số tiền</th>
                     <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Ghi chú</th>
+                    <th className="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">Bill</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-100">
@@ -164,6 +212,15 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">{row.qty}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{formatCurrency(row.amount)}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-rose-500 italic">{row.note}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-center">
+                        <button 
+                          onClick={() => handleViewBill(row.cartId)}
+                          className="text-blue-600 hover:text-blue-800 p-1 rounded-full hover:bg-blue-50 transition-colors"
+                          title="Xem hóa đơn"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   {data.orderTableData.length === 0 && (
@@ -176,6 +233,50 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
             </div>
           </div>
         </div>
+
+        {/* MODAL XEM ẢNH BILL */}
+        <Modal 
+          isOpen={isBillModalOpen} 
+          onClose={() => { setIsBillModalOpen(false); setViewingBillImages(null); }} 
+          title="Ảnh hóa đơn (Bill Images)"
+        >
+          <div className="space-y-4">
+            {loadingBill ? (
+              <div className="flex flex-col items-center justify-center py-10 space-y-3">
+                <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                <p className="text-sm text-gray-500">Đang tải ảnh hóa đơn...</p>
+              </div>
+            ) : viewingBillImages && viewingBillImages.length > 0 ? (
+              <div className="grid grid-cols-1 gap-4">
+                {viewingBillImages.map((url, idx) => (
+                  <div key={idx} className="rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                    <img 
+                      src={url} 
+                      alt={`Bill ${idx + 1}`} 
+                      className="w-full h-auto object-contain max-h-[70vh]" 
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="bg-gray-50 p-2 text-center text-xs text-gray-500 border-t border-gray-100">
+                      Ảnh {idx + 1} / {viewingBillImages.length}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-10 text-gray-500">
+                Không tìm thấy ảnh hóa đơn cho đơn hàng này.
+              </div>
+            )}
+            <div className="flex justify-end mt-4">
+              <button 
+                onClick={() => { setIsBillModalOpen(false); setViewingBillImages(null); }} 
+                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </Modal>
       </div>
     </div>
   );

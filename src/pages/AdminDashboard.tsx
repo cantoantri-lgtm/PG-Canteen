@@ -40,13 +40,15 @@ export default function AdminDashboard() {
   const [selectedShopInput, setSelectedShopInput] = useState('');
   const [selectedBrandInput, setSelectedBrandInput] = useState('');
   const [selectedProductInput, setSelectedProductInput] = useState('');
+  const [selectedManagerInput, setSelectedManagerInput] = useState('');
 
   const [appliedFilters, setAppliedFilters] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
     shopId: '',
     brandId: '',
-    productId: ''
+    productId: '',
+    managerId: ''
   });
 
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'achievement', direction: 'desc' });
@@ -60,7 +62,7 @@ export default function AdminDashboard() {
         supabase.from('shops').select('*').order('shop_name'),
         supabase.from('brands').select('*').order('brand_name'),
         supabase.from('products').select('*'),
-        supabase.from('profiles').select('*').eq('admin_role', false),
+        supabase.from('profiles').select('*').order('full_name'),
         supabase.from('kpis').select('*'),
         supabase.from('schedules').select('*')
       ]);
@@ -124,7 +126,8 @@ export default function AdminDashboard() {
       endDate: endDateInput,
       shopId: selectedShopInput,
       brandId: selectedBrandInput,
-      productId: selectedProductInput
+      productId: selectedProductInput,
+      managerId: selectedManagerInput
     });
   };
 
@@ -147,12 +150,24 @@ export default function AdminDashboard() {
     if (productId) {
       filteredOrders = filteredOrders.filter(o => o.product_id === productId);
     }
+    
+    const { managerId, shopId: filterShopId } = appliedFilters;
 
-    let activePgIds = masterData.profiles.map(p => p.id);
-    if (shopId) {
-      activePgIds = masterData.schedules.filter(s => s.shop_id === shopId).map(s => s.pg_id);
-      filteredOrders = filteredOrders.filter(o => activePgIds.includes(o.pg_id));
+    let activePgIds = masterData.profiles.filter(p => !p.admin_role).map(p => p.id);
+    
+    if (managerId) {
+      activePgIds = activePgIds.filter(id => {
+        const pg = masterData.profiles.find(p => p.id === id);
+        return pg?.manager_id === managerId;
+      });
     }
+
+    if (filterShopId) {
+      const shopPgIds = masterData.schedules.filter(s => s.shop_id === filterShopId).map(s => s.pg_id);
+      activePgIds = activePgIds.filter(id => shopPgIds.includes(id));
+    }
+    
+    filteredOrders = filteredOrders.filter(o => activePgIds.includes(o.pg_id));
 
     const totalOrdersCount = filteredOrders.length;
     const switchOrdersCount = filteredOrders.filter(o => o.is_competitor_product === true).length;
@@ -459,6 +474,15 @@ export default function AdminDashboard() {
             {masterData?.products
               .filter(p => !selectedBrandInput || p.brand_id === selectedBrandInput)
               .map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
+          </select>
+        </div>
+        <div className="w-full">
+          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Quản lý</label>
+          <select value={selectedManagerInput} onChange={e => setSelectedManagerInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
+            <option value="">-- Tất cả Quản lý --</option>
+            {masterData?.profiles
+              .filter(p => masterData.profiles.some(sub => sub.manager_id === p.id))
+              .map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
           </select>
         </div>
         <div className="w-full">
