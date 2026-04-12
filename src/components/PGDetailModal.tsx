@@ -102,6 +102,8 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
         id: o.id,
         date: o.created_at ? format(new Date(o.created_at), 'dd/MM/yyyy HH:mm') : '',
         cartId: o.cart_id,
+        customerName: o.customer_name,
+        customerPhone: o.customer_phone,
         productName: product?.product_name || 'Không xác định',
         qty: o.qty,
         amount: o.net_value,
@@ -196,6 +198,7 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Thời gian</th>
                     <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Mã Giỏ (Cart ID)</th>
+                    <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Khách hàng</th>
                     <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Sản phẩm</th>
                     <th className="px-4 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider">SL</th>
                     <th className="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wider">Số tiền</th>
@@ -208,6 +211,10 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
                     <tr key={idx} className="hover:bg-gray-50">
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{row.date}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 font-mono">{row.cartId?.substring(0, 8)}...</td>
+                      <td className="px-4 py-3 text-sm">
+                        <div className="text-gray-900 font-medium">{row.customerName || '-'}</div>
+                        <div className="text-gray-500 text-[10px]">{row.customerPhone || ''}</div>
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-900 font-medium">{row.productName}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-center">{row.qty}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900 text-right font-medium">{formatCurrency(row.amount)}</td>

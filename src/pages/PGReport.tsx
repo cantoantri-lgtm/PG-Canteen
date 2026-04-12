@@ -72,20 +72,48 @@ export default function PGReport() {
       const end = endOfMonth(date).toISOString();
 
       const { data, error } = await supabase
-        .from('orders')
+        .from('order_details')
         .select(`
-          id, cart_id, product_id, qty, net_value, switched_from_brand, created_at,
+          id, order_id, product_id, qty, net_value, switched_from_brand,
+          orders!inner(
+            cart_id, created_at, pg_id
+          ),
           products (
             product_name,
-            brands ( brand_name )
+            product_group!inner (
+              brands ( brand_name )
+            )
           )
         `)
-        .eq('pg_id', selectedPgId)
-        .gte('created_at', start)
-        .lte('created_at', end);
+        .eq('orders.pg_id', selectedPgId)
+        .gte('orders.created_at', start)
+        .lte('orders.created_at', end);
         
       if (error) throw error;
-      return data as OrderItem[];
+      
+      // Flatten the data
+      return (data || []).map(item => {
+        const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+        const product = Array.isArray(item.products) ? item.products[0] : item.products;
+        const productGroup = Array.isArray(product?.product_group) ? product.product_group[0] : product?.product_group;
+        const brand = Array.isArray(productGroup?.brands) ? productGroup.brands[0] : productGroup?.brands;
+        
+        return {
+          id: item.id,
+          cart_id: order?.cart_id,
+          product_id: item.product_id,
+          qty: item.qty,
+          net_value: item.net_value,
+          switched_from_brand: item.switched_from_brand,
+          created_at: order?.created_at,
+          products: {
+            product_name: product?.product_name,
+            brands: {
+              brand_name: brand?.brand_name
+            }
+          }
+        };
+      }) as any as OrderItem[];
     },
     enabled: !!selectedPgId,
   });

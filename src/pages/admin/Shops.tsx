@@ -11,6 +11,9 @@ interface Shop {
   shop_id: string;
   shop_name: string;
   account_id: string;
+  latitude?: number;
+  longitude?: number;
+  allowed_distance?: number;
   accounts?: { account_name: string };
 }
 
@@ -118,7 +121,10 @@ export default function Shops() {
 
     const payload = {
       shop_name: editForm.shop_name.trim(),
-      account_id: editForm.account_id
+      account_id: editForm.account_id,
+      latitude: editForm.latitude || null,
+      longitude: editForm.longitude || null,
+      allowed_distance: editForm.allowed_distance || 500
     };
 
     saveMutation.mutate({ payload, isKeepOpen });
@@ -236,6 +242,38 @@ export default function Shops() {
                 <option key={acc.account_id} value={acc.account_id}>{acc.account_name}</option>
               ))}
             </select>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Vĩ độ (Latitude)</label>
+              <input 
+                type="number" step="any"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
+                value={editForm.latitude || ''} 
+                onChange={e => setEditForm({...editForm, latitude: parseFloat(e.target.value)})} 
+                placeholder="Ví dụ: 10.762622"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Kinh độ (Longitude)</label>
+              <input 
+                type="number" step="any"
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
+                value={editForm.longitude || ''} 
+                onChange={e => setEditForm({...editForm, longitude: parseFloat(e.target.value)})} 
+                placeholder="Ví dụ: 106.660172"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Khoảng cách cho phép (mét)</label>
+            <input 
+              type="number" 
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
+              value={editForm.allowed_distance || 500} 
+              onChange={e => setEditForm({...editForm, allowed_distance: parseInt(e.target.value)})} 
+            />
+            <p className="mt-1 text-xs text-gray-500">Khoảng cách tối đa PG có thể lưu đơn hàng so với vị trí shop.</p>
           </div>
           <div className="flex justify-end space-x-3 mt-6">
             <button 

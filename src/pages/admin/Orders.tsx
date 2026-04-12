@@ -9,14 +9,20 @@ import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 
 // --- CÁC INTERFACE DỮ LIỆU (Cập nhật theo cấu trúc mới) ---
 interface Order {
-  id: string;
+  id: string; // detail id
+  order_id: string; // header id
   cart_id: string;
   created_at: string;
   pg_id: string;
+  program_id: string;
   product_id: string;
   qty: number;
   net_value: number;
+  bill_image_url?: string | null;
   switched_from_brand?: string | null;
+  customer_name?: string | null;
+  customer_phone?: string | null;
+  distance_from_shop?: number | null;
   profiles?: { full_name: string };
   products?: { product_name: string; brand_id: string };
 }
@@ -35,11 +41,13 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPgFilter, setSelectedPgFilter] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
+  const [selectedProgramFilter, setSelectedProgramFilter] = useState('');
   
   // State cho xem ảnh Bill
   const [viewingBillImages, setViewingBillImages] = useState<string[] | null>(null);
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [loadingBill, setLoadingBill] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
   
   // State mới cho đối thủ & Giỏ hàng Admin
   const [isConverted, setIsConverted] = useState(false);
@@ -61,15 +69,57 @@ export default function Orders() {
   };
 
   // --- 1. LẤY DỮ LIỆU TỪ SUPABASE ---
-  const { data: orders = [], isLoading: loadingOrders } = useQuery({
+  const { data: orders = [], isLoading: loadingOrders, error: ordersError } = useQuery({
     queryKey: ['admin_orders_list'],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('orders')
-        .select('*, profiles(full_name), products(product_name, brand_id)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data as Order[];
+        .from('order_details')
+        .select(`
+          id, order_id, product_id, qty, net_value, switched_from_brand,
+          orders!inner(
+            cart_id, created_at, pg_id, program_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
+            profiles(full_name)
+          ),
+          products(
+            product_name,
+            product_group!inner(brand_id)
+          )
+        `)
+        .order('id', { ascending: false });
+      
+      if (error) {
+        console.error('Lỗi tải đơn hàng:', error);
+        throw error;
+      }
+      
+      // Flatten the data
+      return (data || []).map(item => {
+        const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+        const product = Array.isArray(item.products) ? item.products[0] : item.products;
+        const productGroup = Array.isArray(product?.product_group) ? product.product_group[0] : product?.product_group;
+        
+        return {
+          id: item.id,
+          order_id: item.order_id,
+          product_id: item.product_id,
+          qty: item.qty,
+          net_value: item.net_value,
+          switched_from_brand: item.switched_from_brand,
+          cart_id: order?.cart_id,
+          created_at: order?.created_at,
+          pg_id: order?.pg_id,
+          program_id: order?.program_id,
+          customer_name: order?.customer_name,
+          customer_phone: order?.customer_phone,
+          bill_image_url: order?.bill_image_url,
+          distance_from_shop: order?.distance_from_shop,
+          profiles: order?.profiles,
+          products: {
+            product_name: product?.product_name,
+            brand_id: productGroup?.brand_id
+          }
+        };
+      }) as any as Order[];
     }
   });
 
@@ -88,6 +138,15 @@ export default function Orders() {
       const { data, error } = await supabase.from('brands').select('*').order('brand_name');
       if (error) throw error;
       return data as Brand[];
+    }
+  });
+
+  const { data: programs = [] } = useQuery({
+    queryKey: ['programs_list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('programs').select('program_id, program_name').order('program_name');
+      if (error) throw error;
+      return data;
     }
   });
 
@@ -110,32 +169,121 @@ export default function Orders() {
 
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
-      const matchesSearch = o.cart_id.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           (o.profiles?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      const cartId = o.cart_id || '';
+      const pgName = o.profiles?.full_name || '';
+      const custName = o.customer_name || '';
+      const custPhone = o.customer_phone || '';
+      
+      const matchesSearch = cartId.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                           pgName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           custName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                           custPhone.toLowerCase().includes(searchQuery.toLowerCase());
+      
       const matchesPg = selectedPgFilter === '' || o.pg_id === selectedPgFilter;
       const matchesBrand = selectedBrandFilter === '' || o.products?.brand_id === selectedBrandFilter;
-      return matchesSearch && matchesPg && matchesBrand;
+      const matchesProgram = selectedProgramFilter === '' || o.program_id === selectedProgramFilter;
+      
+      return matchesSearch && matchesPg && matchesBrand && matchesProgram;
     });
-  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter]);
+  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter]);
 
   // --- 3. MUTATIONS (THÊM / SỬA / XÓA) ---
   const saveMutation = useMutation({
     mutationFn: async ({ payload, isKeepOpen }: { payload: any; isKeepOpen: boolean }) => {
       if (isAdding) {
-        // Nếu đang thêm mới mà chưa có mã giỏ, tạo mã mới
+        // 1. Xác định hoặc tạo Header (orders)
+        let activeOrderId = '';
         let activeCartId = currentCartId;
+
         if (!activeCartId) {
           activeCartId = await generateUniqueCartId();
+          
+          // Tạo header mới
+          const headerPayload = {
+            cart_id: activeCartId,
+            pg_id: payload.pg_id,
+            program_id: payload.program_id,
+            customer_name: payload.customer_name,
+            customer_phone: payload.customer_phone,
+            bill_image_url: payload.bill_image_url,
+            created_at: new Date().toISOString()
+          };
+          
+          const { data: headerData, error: headerError } = await supabase
+            .from('orders')
+            .insert([headerPayload])
+            .select()
+            .single();
+            
+          if (headerError) throw headerError;
+          activeOrderId = headerData.id;
+        } else {
+          // Tìm header hiện tại theo cart_id
+          const { data: existingHeader, error: findError } = await supabase
+            .from('orders')
+            .select('id')
+            .eq('cart_id', activeCartId)
+            .single();
+            
+          if (findError) throw findError;
+          activeOrderId = existingHeader.id;
+
+          // Cập nhật bill_image_url nếu có thay đổi
+          if (payload.bill_image_url) {
+            await supabase
+              .from('orders')
+              .update({ bill_image_url: payload.bill_image_url })
+              .eq('id', activeOrderId);
+          }
         }
+
+        // 2. Thêm vào Details
+        const detailPayload = {
+          order_id: activeOrderId,
+          product_id: payload.product_id,
+          qty: payload.qty,
+          net_value: payload.net_value,
+          switched_from_brand: payload.switched_from_brand,
+          is_gift: false
+        };
+
+        const { data: detailData, error: detailError } = await supabase
+          .from('order_details')
+          .insert([detailPayload])
+          .select()
+          .single();
+
+        if (detailError) throw detailError;
         
-        const insertPayload = { ...payload, cart_id: activeCartId, created_at: new Date().toISOString() };
-        const { data, error } = await supabase.from('orders').insert([insertPayload]).select().single();
-        if (error) throw error;
-        return { data, isKeepOpen, activeCartId };
+        return { data: detailData, isKeepOpen, activeCartId };
       } else {
-        // Cập nhật
-        const { error } = await supabase.from('orders').update(payload).eq('id', editForm.id);
-        if (error) throw error;
+        // Cập nhật Details
+        const { error: detailError } = await supabase
+          .from('order_details')
+          .update({
+            product_id: payload.product_id,
+            qty: payload.qty,
+            net_value: payload.net_value,
+            switched_from_brand: payload.switched_from_brand
+          })
+          .eq('id', editForm.id);
+        
+        if (detailError) throw detailError;
+
+        // Cập nhật Header (nếu cần - ví dụ thông tin khách hàng)
+        const { error: headerError } = await supabase
+          .from('orders')
+          .update({
+            pg_id: payload.pg_id,
+            program_id: payload.program_id,
+            customer_name: payload.customer_name,
+            customer_phone: payload.customer_phone,
+            bill_image_url: payload.bill_image_url
+          })
+          .eq('id', editForm.order_id);
+
+        if (headerError) throw headerError;
+
         return { data: payload, isKeepOpen, activeCartId: null };
       }
     },
@@ -160,7 +308,7 @@ export default function Orders() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from('orders').delete().eq('id', id);
+      const { error } = await supabase.from('order_details').delete().eq('id', id);
       if (error) throw error;
       return id;
     },
@@ -177,7 +325,7 @@ export default function Orders() {
   const handleAdd = () => {
     setIsAdding(true);
     setCurrentCartId(''); // Reset mã giỏ khi bắt đầu phiên nhập mới
-    setEditForm({ qty: 1, net_value: 0 });
+    setEditForm({ qty: 1, net_value: 0, program_id: selectedProgramFilter || '' });
     setSelectedBrandId('');
     setIsConverted(false);
     setCompetitorBrand('');
@@ -197,7 +345,7 @@ export default function Orders() {
   };
 
   const handleSave = (isKeepOpen = false) => {
-    if (!editForm.pg_id || !editForm.product_id || !editForm.qty || editForm.net_value === undefined) {
+    if (!editForm.pg_id || !editForm.program_id || !editForm.product_id || !editForm.qty || editForm.net_value === undefined) {
       toast.error("Vui lòng điền đầy đủ các trường bắt buộc (*)");
       return;
     }
@@ -208,10 +356,14 @@ export default function Orders() {
 
     const payload = {
       pg_id: editForm.pg_id,
+      program_id: editForm.program_id,
       product_id: editForm.product_id,
       qty: editForm.qty,
       net_value: editForm.net_value,
-      switched_from_brand: isConverted ? competitorBrand.trim() : null
+      switched_from_brand: isConverted ? competitorBrand.trim() : null,
+      customer_name: editForm.customer_name || null,
+      customer_phone: editForm.customer_phone || null,
+      bill_image_url: editForm.bill_image_url || null
     };
 
     saveMutation.mutate({ payload, isKeepOpen });
@@ -224,38 +376,42 @@ export default function Orders() {
     }
   };
 
-  const handleViewBill = async (cartId: string) => {
+  const handleViewBill = async (cartId: string, directImageUrl?: string | null) => {
     setLoadingBill(true);
     setIsBillModalOpen(true);
+    
+    if (directImageUrl) {
+      setViewingBillImages(directImageUrl.split(','));
+      setLoadingBill(false);
+      return;
+    }
+
     try {
-      // Thử lấy từ order_headers (theo mô tả ban đầu của người dùng)
-      const { data, error } = await supabase
-        .from('order_headers')
+      // Thử lấy từ orders (theo schema mới)
+      const { data: orderData, error: orderError } = await supabase
+        .from('orders')
         .select('bill_image_url')
         .eq('cart_id', cartId)
+        .not('bill_image_url', 'is', null)
+        .limit(1)
         .single();
-      
-      if (error) {
-        // Nếu không có order_headers, thử tìm trong chính bảng orders (đề phòng schema phẳng)
-        const { data: orderData, error: orderError } = await supabase
-          .from('orders')
+        
+      if (!orderError && orderData?.bill_image_url) {
+        setViewingBillImages(orderData.bill_image_url.split(','));
+      } else {
+        // Thử lấy từ order_headers (fallback)
+        const { data, error } = await supabase
+          .from('order_headers')
           .select('bill_image_url')
           .eq('cart_id', cartId)
-          .not('bill_image_url', 'is', null)
-          .limit(1)
           .single();
-          
-        if (orderError || !orderData?.bill_image_url) {
+        
+        if (error || !data?.bill_image_url) {
           setViewingBillImages([]);
           toast.error("Không tìm thấy ảnh hóa đơn cho đơn hàng này.");
         } else {
-          setViewingBillImages(orderData.bill_image_url.split(','));
+          setViewingBillImages(data.bill_image_url.split(','));
         }
-      } else if (data?.bill_image_url) {
-        setViewingBillImages(data.bill_image_url.split(','));
-      } else {
-        setViewingBillImages([]);
-        toast.error("Đơn hàng này không có ảnh hóa đơn.");
       }
     } catch (err) {
       console.error("Lỗi khi tải ảnh bill:", err);
@@ -275,7 +431,7 @@ export default function Orders() {
       return;
     }
 
-    const headers = ['Mã Giỏ Hàng', 'Ngày tạo', 'Nhân viên PG', 'Sản phẩm', 'Số lượng', 'Thành tiền', 'Cướp từ đối thủ'];
+    const headers = ['Mã Giỏ Hàng', 'Ngày tạo', 'Nhân viên PG', 'Sản phẩm', 'Số lượng', 'Thành tiền', 'Cướp từ đối thủ', 'Link hóa đơn'];
     const rows = orders.map(order => [
       order.cart_id,
       new Date(order.created_at).toLocaleString('vi-VN'),
@@ -283,7 +439,8 @@ export default function Orders() {
       order.products?.product_name || 'N/A',
       order.qty,
       order.net_value,
-      order.switched_from_brand || 'Không'
+      order.switched_from_brand || 'Không',
+      order.bill_image_url || ''
     ]);
 
     const csvContent = [
@@ -320,8 +477,8 @@ export default function Orders() {
       </div>
 
       {/* BỘ LỌC */}
-      <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-        <div className="flex-1">
+      <div className="flex flex-col sm:flex-row flex-wrap gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+        <div className="flex-1 min-w-[200px]">
           <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm đơn hàng</label>
           <input
             type="text"
@@ -330,6 +487,17 @@ export default function Orders() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
+        </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Chương trình</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedProgramFilter}
+            onChange={(e) => setSelectedProgramFilter(e.target.value)}
+          >
+            <option value="">Tất cả Program</option>
+            {programs.map((p: any) => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
+          </select>
         </div>
         <div className="w-full sm:w-48">
           <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo PG</label>
@@ -353,6 +521,26 @@ export default function Orders() {
             {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
           </select>
         </div>
+        <div className="flex items-end">
+          <button 
+            onClick={() => {
+              setSearchQuery('');
+              setSelectedPgFilter('');
+              setSelectedBrandFilter('');
+              setSelectedProgramFilter('');
+            }}
+            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-indigo-600 transition-colors"
+          >
+            Xóa lọc
+          </button>
+        </div>
+      </div>
+
+      <div className="flex justify-between items-center px-1">
+        <div className="text-sm text-gray-500">
+          Hiển thị <strong>{filteredOrders.length}</strong> / {orders.length} đơn hàng
+          {ordersError && <span className="text-red-500 ml-2">(Lỗi: {(ordersError as any).message})</span>}
+        </div>
       </div>
 
       {/* BẢNG HIỂN THỊ */}
@@ -365,10 +553,13 @@ export default function Orders() {
                   <tr>
                     <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Mã GH / Ngày tạo</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Nhân viên PG</th>
+                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Khách hàng</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Sản phẩm</th>
                     <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Số lượng</th>
                     <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Thành tiền</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Đổi từ hãng</th>
+                    <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Hóa đơn</th>
+                    <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Khoảng cách</th>
                     <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Thao tác</span></th>
                   </tr>
                 </thead>
@@ -380,6 +571,10 @@ export default function Orders() {
                         <div className="text-gray-900">{new Date(order.created_at).toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-indigo-600">{order.profiles?.full_name || 'N/A'}</td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm">
+                        <div className="text-gray-900 font-medium">{order.customer_name || '-'}</div>
+                        <div className="text-gray-500 text-xs">{order.customer_phone || ''}</div>
+                      </td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">{order.products?.product_name || 'N/A'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900 text-right font-semibold">{order.qty}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-green-600 text-right font-semibold">
@@ -398,14 +593,43 @@ export default function Orders() {
                           <span className="text-gray-400">-</span>
                         )}
                       </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
+                        {order.bill_image_url ? (
+                          <div className="flex items-center justify-center space-x-1">
+                            <img 
+                              src={order.bill_image_url.split(',')[0]} 
+                              alt="Bill" 
+                              className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                              referrerPolicy="no-referrer"
+                              onClick={() => handleViewBill(order.cart_id, order.bill_image_url)}
+                            />
+                            {order.bill_image_url.split(',').length > 1 && (
+                              <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                                +{order.bill_image_url.split(',').length - 1}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-right">
+                        {order.distance_from_shop != null ? (
+                          <span className={`font-medium ${order.distance_from_shop > 500 ? 'text-red-600' : 'text-gray-900'}`}>
+                            {Math.round(order.distance_from_shop)}m
+                          </span>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                        <button onClick={() => handleViewBill(order.cart_id)} className="text-blue-600 hover:text-blue-900 mr-4" title="Xem hóa đơn"><Eye className="h-4 w-4" /></button>
+                        <button onClick={() => handleViewBill(order.cart_id, order.bill_image_url)} className="text-blue-600 hover:text-blue-900 mr-4" title="Xem hóa đơn"><Eye className="h-4 w-4" /></button>
                         <button onClick={() => handleEdit(order)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
                         <button onClick={() => setDeleteId(order.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
                       </td>
                     </tr>
                   ))}
-                  {filteredOrders.length === 0 && <tr><td colSpan={7} className="px-6 py-8 text-center text-gray-500">Không tìm thấy đơn hàng nào.</td></tr>}
+                  {filteredOrders.length === 0 && <tr><td colSpan={9} className="px-6 py-8 text-center text-gray-500">Không tìm thấy đơn hàng nào.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -435,6 +659,51 @@ export default function Orders() {
               <option value="">-- Chọn nhân viên --</option>
               {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Chương trình *</label>
+            <select
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+              value={editForm.program_id || ''}
+              onChange={e => setEditForm({...editForm, program_id: e.target.value})}
+              disabled={!!currentCartId}
+            >
+              <option value="">-- Chọn chương trình --</option>
+              {programs.map((p: any) => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Tên Khách hàng</label>
+              <input 
+                type="text" 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
+                value={editForm.customer_name || ''} 
+                onChange={e => setEditForm({...editForm, customer_name: e.target.value})} 
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Số điện thoại</label>
+              <input 
+                type="text" 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
+                value={editForm.customer_phone || ''} 
+                onChange={e => setEditForm({...editForm, customer_phone: e.target.value})} 
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Link ảnh hóa đơn (Các link cách nhau bởi dấu phẩy)</label>
+            <input 
+              type="text" 
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
+              value={editForm.bill_image_url || ''} 
+              onChange={e => setEditForm({...editForm, bill_image_url: e.target.value})} 
+              placeholder="https://example.com/image1.jpg, https://example.com/image2.jpg"
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -535,7 +804,7 @@ export default function Orders() {
       {/* MODAL XEM ẢNH BILL */}
       <Modal 
         isOpen={isBillModalOpen} 
-        onClose={() => { setIsBillModalOpen(false); setViewingBillImages(null); }} 
+        onClose={() => { setIsBillModalOpen(false); setViewingBillImages(null); setZoomedImage(null); }} 
         title="Ảnh hóa đơn (Bill Images)"
       >
         <div className="space-y-4">
@@ -547,13 +816,17 @@ export default function Orders() {
           ) : viewingBillImages && viewingBillImages.length > 0 ? (
             <div className="grid grid-cols-1 gap-4">
               {viewingBillImages.map((url, idx) => (
-                <div key={idx} className="rounded-lg overflow-hidden border border-gray-200 shadow-sm">
+                <div key={idx} className="rounded-lg overflow-hidden border border-gray-200 shadow-sm group relative">
                   <img 
                     src={url} 
                     alt={`Bill ${idx + 1}`} 
-                    className="w-full h-auto object-contain max-h-[70vh]" 
+                    className="w-full h-auto object-contain max-h-[70vh] cursor-zoom-in hover:opacity-95 transition-opacity" 
                     referrerPolicy="no-referrer"
+                    onClick={() => setZoomedImage(url)}
                   />
+                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                    <div className="bg-black/50 text-white px-3 py-1 rounded-full text-xs font-bold">Click để phóng to</div>
+                  </div>
                   <div className="bg-gray-50 p-2 text-center text-xs text-gray-500 border-t border-gray-100">
                     Ảnh {idx + 1} / {viewingBillImages.length}
                   </div>
@@ -567,7 +840,7 @@ export default function Orders() {
           )}
           <div className="flex justify-end mt-4">
             <button 
-              onClick={() => { setIsBillModalOpen(false); setViewingBillImages(null); }} 
+              onClick={() => { setIsBillModalOpen(false); setViewingBillImages(null); setZoomedImage(null); }} 
               className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors"
             >
               Đóng
@@ -575,6 +848,31 @@ export default function Orders() {
           </div>
         </div>
       </Modal>
+
+      {/* MODAL PHÓNG TO ẢNH */}
+      {zoomedImage && (
+        <div 
+          className="fixed inset-0 z-[9999] bg-black/90 flex items-center justify-center p-4 cursor-zoom-out"
+          onClick={() => setZoomedImage(null)}
+        >
+          <div className="relative max-w-full max-h-full">
+            <img 
+              src={zoomedImage} 
+              alt="Zoomed Bill" 
+              className="max-w-full max-h-[95vh] object-contain shadow-2xl rounded-lg"
+              referrerPolicy="no-referrer"
+            />
+            <button 
+              className="absolute top-4 right-4 bg-white/20 hover:bg-white/40 text-white rounded-full p-2 transition-colors"
+              onClick={(e) => { e.stopPropagation(); setZoomedImage(null); }}
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

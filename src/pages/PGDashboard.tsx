@@ -57,6 +57,10 @@ export default function PGDashboard() {
   const [competitorBrand, setCompetitorBrand] = useState('');
   const [selectedProductType, setSelectedProductType] = useState<'Bán hàng' | 'Quà tặng' | 'Mẫu thử'>('Bán hàng');
   
+  const [currentDistance, setCurrentDistance] = useState<number | null>(null);
+  const [isLocationLoading, setIsLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
   const [cart, setCart] = useState<CartItem[]>([]);
   const [applicableGifts, setApplicableGifts] = useState<any[]>([]);
   
@@ -88,7 +92,7 @@ export default function PGDashboard() {
     queryKey: ['pg_shops', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data } = await supabase.from('schedules').select('shop_id, program_id, shops(shop_name)').eq('pg_id', user.id);
+      const { data } = await supabase.from('schedules').select('shop_id, program_id, shops(shop_name, latitude, longitude, allowed_distance)').eq('pg_id', user.id);
       const uniqueShops = new Map();
       data?.forEach((item: any) => { if (item.shop_id) uniqueShops.set(item.shop_id, item); });
       return Array.from(uniqueShops.values());
@@ -274,6 +278,56 @@ export default function PGDashboard() {
   useEffect(() => {
     if (shops.length === 1 && !selectedShopId) setSelectedShopId(shops[0].shop_id);
   }, [shops, selectedShopId]);
+
+  // Tính khoảng cách khi chọn cửa hàng
+  useEffect(() => {
+    if (!selectedShopId) {
+      setCurrentDistance(null);
+      setLocationError(null);
+      return;
+    }
+
+    const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
+    const shopData = selectedSchedule?.shops;
+
+    if (!shopData?.latitude || !shopData?.longitude) {
+      setCurrentDistance(null);
+      setLocationError("Cửa hàng này chưa được thiết lập tọa độ.");
+      return;
+    }
+
+    setIsLocationLoading(true);
+    setLocationError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        
+        const R = 6371e3; // metres
+        const φ1 = lat * Math.PI/180;
+        const φ2 = shopData.latitude * Math.PI/180;
+        const Δφ = (shopData.latitude - lat) * Math.PI/180;
+        const Δλ = (shopData.longitude - lng) * Math.PI/180;
+
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+        const distance = R * c;
+        setCurrentDistance(distance);
+        setIsLocationLoading(false);
+      },
+      (err) => {
+        console.error("Lỗi lấy vị trí:", err);
+        setLocationError("Không thể lấy vị trí hiện tại của bạn. Vui lòng bật định vị.");
+        setCurrentDistance(null);
+        setIsLocationLoading(false);
+      },
+      { timeout: 10000, enableHighAccuracy: true }
+    );
+  }, [selectedShopId, shops]);
 
   // Tự động điền giá tiền khi chọn sản phẩm
   useEffect(() => {
@@ -478,6 +532,14 @@ export default function PGDashboard() {
       if (!selectedShopId) throw new Error('Vui lòng chọn cửa hàng');
       if (billImages.length === 0) throw new Error('Vui lòng chụp ít nhất 1 ảnh hóa đơn');
 
+      const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
+      const shopData = selectedSchedule?.shops;
+      const allowedDistance = shopData?.allowed_distance || 500;
+
+      if (currentDistance !== null && currentDistance > allowedDistance) {
+        throw new Error(`Bạn đang ở quá xa cửa hàng (${Math.round(currentDistance)}m). Khoảng cách cho phép là ${allowedDistance}m.`);
+      }
+
       // 1. Lấy vị trí hiện tại
       const getCoords = () => new Promise<{lat: number, lng: number}>((resolve) => {
         navigator.geolocation.getCurrentPosition(
@@ -488,10 +550,27 @@ export default function PGDashboard() {
       });
       const coords = await getCoords();
 
+      // Calculate distance if shop has coordinates
+      const programId = selectedSchedule?.program_id;
+      
+      let distance = null;
+      if (coords.lat !== 0 && coords.lng !== 0 && shopData?.latitude && shopData?.longitude) {
+        const R = 6371e3; // metres
+        const φ1 = coords.lat * Math.PI/180; // φ, λ in radians
+        const φ2 = shopData.latitude * Math.PI/180;
+        const Δφ = (shopData.latitude - coords.lat) * Math.PI/180;
+        const Δλ = (shopData.longitude - coords.lng) * Math.PI/180;
+
+        const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                  Math.cos(φ1) * Math.cos(φ2) *
+                  Math.sin(Δλ/2) * Math.sin(Δλ/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+
+        distance = R * c; // in metres
+      }
+
       // 2. Tạo Cart ID & Program ID
       const { data: finalCartId } = await supabase.rpc('generate_cart_id');
-      const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
-      const programId = selectedSchedule?.program_id;
 
       // 3. Upload tất cả ảnh lên Storage
       const uploadPromises = billImages.map(async (file, index) => {
@@ -526,6 +605,7 @@ export default function PGDashboard() {
         bill_image_url: billImageUrlString,
         latitude: coords.lat,
         longitude: coords.lng,
+        distance_from_shop: distance,
         customer_name: customerName,
         customer_phone: customerPhone
       };
@@ -591,6 +671,28 @@ export default function PGDashboard() {
           <option value="">-- Chọn cửa hàng làm việc --</option>
           {shops.map((s: any) => <option key={s.shop_id} value={s.shop_id}>{s.shops?.shop_name}</option>)}
         </select>
+
+        {selectedShopId && (
+          <div className="text-sm px-1">
+            {isLocationLoading ? (
+              <span className="text-gray-500 flex items-center gap-2">
+                <div className="w-3 h-3 border-2 border-gray-300 border-t-gray-600 rounded-full animate-spin"></div>
+                Đang kiểm tra vị trí...
+              </span>
+            ) : locationError ? (
+              <span className="text-red-500">{locationError}</span>
+            ) : currentDistance !== null ? (
+              <span className={`font-medium ${
+                currentDistance > (shops.find((s: any) => s.shop_id === selectedShopId)?.shops?.allowed_distance || 500) 
+                  ? 'text-red-600' 
+                  : 'text-green-600'
+              }`}>
+                Khoảng cách đến shop: {Math.round(currentDistance)}m 
+                (Cho phép: {shops.find((s: any) => s.shop_id === selectedShopId)?.shops?.allowed_distance || 500}m)
+              </span>
+            ) : null}
+          </div>
+        )}
 
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-2">

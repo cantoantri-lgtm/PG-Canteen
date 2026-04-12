@@ -32,6 +32,7 @@ interface MasterData {
   profiles: any[];
   kpis: any[];
   schedules: any[];
+  programs: any[];
 }
 
 export default function AdminDashboard() {
@@ -41,6 +42,7 @@ export default function AdminDashboard() {
   const [selectedBrandInput, setSelectedBrandInput] = useState('');
   const [selectedProductInput, setSelectedProductInput] = useState('');
   const [selectedManagerInput, setSelectedManagerInput] = useState('');
+  const [selectedProgramInput, setSelectedProgramInput] = useState('');
 
   const [appliedFilters, setAppliedFilters] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
@@ -48,7 +50,8 @@ export default function AdminDashboard() {
     shopId: '',
     brandId: '',
     productId: '',
-    managerId: ''
+    managerId: '',
+    programId: ''
   });
 
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'achievement', direction: 'desc' });
@@ -58,13 +61,14 @@ export default function AdminDashboard() {
   const { data: masterData, isLoading: loadingMaster } = useQuery({
     queryKey: ['masterData'],
     queryFn: async () => {
-      const [shopsRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes] = await Promise.all([
+      const [shopsRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes, programsRes] = await Promise.all([
         supabase.from('shops').select('*').order('shop_name'),
         supabase.from('brands').select('*').order('brand_name'),
-        supabase.from('products').select('*'),
+        supabase.from('products').select('*, product_group!inner(brand_id)'),
         supabase.from('profiles').select('*').order('full_name'),
         supabase.from('kpis').select('*'),
-        supabase.from('schedules').select('*')
+        supabase.from('schedules').select('*'),
+        supabase.from('programs').select('*').order('program_name')
       ]);
 
       if (shopsRes.error) console.error('Lỗi tải shops:', shopsRes.error);
@@ -73,14 +77,19 @@ export default function AdminDashboard() {
       if (profilesRes.error) console.error('Lỗi tải profiles:', profilesRes.error);
       if (kpisRes.error) console.error('Lỗi tải kpis:', kpisRes.error);
       if (schedulesRes.error) console.error('Lỗi tải schedules:', schedulesRes.error);
+      if (programsRes.error) console.error('Lỗi tải programs:', programsRes.error);
 
       return {
         shops: shopsRes.data || [],
         brands: brandsRes.data || [],
-        products: productsRes.data || [],
+        products: (productsRes.data || []).map(p => ({
+          ...p,
+          brand_id: Array.isArray(p.product_group) ? p.product_group[0]?.brand_id : p.product_group?.brand_id
+        })),
         profiles: profilesRes.data || [],
         kpis: kpisRes.data || [],
-        schedules: schedulesRes.data || []
+        schedules: schedulesRes.data || [],
+        programs: programsRes.data || []
       } as MasterData;
     },
     retry: false
@@ -88,7 +97,7 @@ export default function AdminDashboard() {
 
   const { report: smartReportData } = useSmartReport(masterData, true, appliedFilters.endDate);
 
-  const { data: ordersData = [], isLoading: loadingOrders } = useQuery({
+  const { data: ordersData = [], isLoading: loadingOrders, error: ordersError } = useQuery({
     queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate],
     queryFn: async () => {
       const start = new Date(appliedFilters.startDate);
@@ -96,17 +105,38 @@ export default function AdminDashboard() {
       const end = new Date(appliedFilters.endDate);
       end.setHours(23, 59, 59, 999);
 
+      // Query order_details and join with orders (header)
       const { data, error } = await supabase
-        .from('orders')
-        .select('*, profiles(full_name)')
-        .gte('created_at', start.toISOString())
-        .lte('created_at', end.toISOString());
+        .from('order_details')
+        .select(`
+          *,
+          orders!inner(
+            id, cart_id, created_at, pg_id, program_id, shop_id,
+            customer_name, customer_phone,
+            profiles(full_name, manager_id)
+          )
+        `)
+        .gte('orders.created_at', start.toISOString())
+        .lte('orders.created_at', end.toISOString());
 
       if (error) {
-        console.error('Lỗi tải đơn hàng:', error);
+        console.error('Lỗi tải dữ liệu đơn hàng:', error);
         return [];
       }
-      return data || [];
+      
+      // Flatten or map the data for easier use in the dashboard
+      return (data || []).map(item => ({
+        ...item,
+        cart_id: item.orders.cart_id,
+        created_at: item.orders.created_at,
+        pg_id: item.orders.pg_id,
+        program_id: item.orders.program_id,
+        shop_id: item.orders.shop_id,
+        customer_name: item.orders.customer_name,
+        customer_phone: item.orders.customer_phone,
+        full_name: item.orders.profiles?.full_name,
+        manager_id: item.orders.profiles?.manager_id
+      }));
     },
     retry: false
   });
@@ -127,7 +157,8 @@ export default function AdminDashboard() {
       shopId: selectedShopInput,
       brandId: selectedBrandInput,
       productId: selectedProductInput,
-      managerId: selectedManagerInput
+      managerId: selectedManagerInput,
+      programId: selectedProgramInput
     });
   };
 
@@ -135,12 +166,16 @@ export default function AdminDashboard() {
     if (!masterData || !ordersData) return null;
 
     let filteredOrders = [...ordersData];
-    const { shopId, brandId, productId, startDate, endDate } = appliedFilters;
+    const { shopId, brandId, productId, startDate, endDate, programId } = appliedFilters;
 
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
+
+    if (programId) {
+      filteredOrders = filteredOrders.filter(o => o.program_id === programId);
+    }
 
     if (brandId) {
       const productIds = masterData.products.filter(p => p.brand_id === brandId).map(p => p.product_id);
@@ -166,11 +201,17 @@ export default function AdminDashboard() {
       const shopPgIds = masterData.schedules.filter(s => s.shop_id === filterShopId).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => shopPgIds.includes(id));
     }
+
+    if (programId) {
+      const programPgIds = masterData.schedules.filter(s => s.program_id === programId).map(s => s.pg_id);
+      activePgIds = activePgIds.filter(id => programPgIds.includes(id));
+    }
     
     filteredOrders = filteredOrders.filter(o => activePgIds.includes(o.pg_id));
 
-    const totalOrdersCount = filteredOrders.length;
-    const switchOrdersCount = filteredOrders.filter(o => o.is_competitor_product === true).length;
+    const uniqueOrderIds = new Set(filteredOrders.map(o => o.cart_id));
+    const totalOrdersCount = uniqueOrderIds.size;
+    const switchOrdersCount = filteredOrders.filter(o => o.switched_from_brand && !o.switched_from_brand.startsWith('QUÀ TẶNG')).length;
     const conversionRate = totalOrdersCount > 0 ? (switchOrdersCount / totalOrdersCount) * 100 : 0;
 
     const totalRevenue = filteredOrders.reduce((sum, o) => sum + Number(o.net_value), 0);
@@ -441,7 +482,7 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4 items-end">
+      <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 mb-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4 items-end">
         <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Từ ngày</label>
           <input type="date" value={startDateInput} onChange={e => setStartDateInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-gray-50"/>
@@ -451,10 +492,19 @@ export default function AdminDashboard() {
           <input type="date" value={endDateInput} onChange={e => setEndDateInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-gray-50"/>
         </div>
         <div className="w-full">
+          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Chương trình</label>
+          <select value={selectedProgramInput} onChange={e => setSelectedProgramInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
+            <option value="">-- Tất cả Program --</option>
+            {masterData?.programs.map(p => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
+          </select>
+        </div>
+        <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Cửa hàng</label>
           <select value={selectedShopInput} onChange={e => setSelectedShopInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
             <option value="">-- Tất cả Cửa hàng --</option>
-            {masterData?.shops.map(s => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
+            {masterData?.shops
+              .filter(s => !selectedProgramInput || masterData.schedules.some(sch => sch.shop_id === s.shop_id && sch.program_id === selectedProgramInput))
+              .map(s => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
           </select>
         </div>
         <div className="w-full">
@@ -498,7 +548,17 @@ export default function AdminDashboard() {
 
       {loadingOrders && data ? <div className="text-center text-sm text-gray-500 animate-pulse">Đang tính toán lại dữ liệu...</div> : null}
 
-      {data && (
+      {ordersData.length === 0 && !loadingOrders && (
+        <div className="p-12 text-center bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+          <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Sparkles className="w-8 h-8 text-gray-400" />
+          </div>
+          <h3 className="text-lg font-bold text-gray-900 mb-1">Chưa có dữ liệu đơn hàng</h3>
+          <p className="text-gray-500 max-w-xs mx-auto">Hệ thống chưa ghi nhận đơn hàng nào trong khoảng thời gian và bộ lọc đã chọn.</p>
+        </div>
+      )}
+
+      {data && ordersData.length > 0 && (
         <>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <div className="overflow-hidden rounded-lg bg-white shadow border-l-4 border-indigo-500 p-5 relative">
