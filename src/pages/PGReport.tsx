@@ -34,14 +34,25 @@ export default function PGReport() {
   const { data: allProfiles = [] } = useQuery({
     queryKey: ['all_profiles'],
     queryFn: async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name, manager_id, admin_role').order('full_name');
+      const { data } = await supabase.from('profiles').select('id, full_name, manager_id, admin_role, role').order('full_name');
+      return data || [];
+    }
+  });
+
+  const { data: roles = [] } = useQuery({
+    queryKey: ['roles'],
+    queryFn: async () => {
+      const { data } = await supabase.from('roles').select('*');
       return data || [];
     }
   });
 
   const managers = useMemo(() => {
-    return allProfiles.filter(p => allProfiles.some(sub => sub.manager_id === p.id));
-  }, [allProfiles]);
+    return allProfiles.filter(p => {
+      const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
+      return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
+    });
+  }, [allProfiles, roles]);
 
   const filteredProfiles = useMemo(() => {
     if (isAdmin) {

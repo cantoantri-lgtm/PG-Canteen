@@ -33,6 +33,7 @@ interface MasterData {
   kpis: any[];
   schedules: any[];
   programs: any[];
+  roles: any[];
 }
 
 export default function AdminDashboard() {
@@ -61,14 +62,15 @@ export default function AdminDashboard() {
   const { data: masterData, isLoading: loadingMaster } = useQuery({
     queryKey: ['masterData'],
     queryFn: async () => {
-      const [shopsRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes, programsRes] = await Promise.all([
+      const [shopsRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes, programsRes, rolesRes] = await Promise.all([
         supabase.from('shops').select('*').order('shop_name'),
         supabase.from('brands').select('*').order('brand_name'),
         supabase.from('products').select('*, product_group!inner(brand_id)'),
         supabase.from('profiles').select('*').order('full_name'),
         supabase.from('kpis').select('*'),
         supabase.from('schedules').select('*'),
-        supabase.from('programs').select('*').order('program_name')
+        supabase.from('programs').select('*').order('program_name'),
+        supabase.from('roles').select('*')
       ]);
 
       if (shopsRes.error) console.error('Lỗi tải shops:', shopsRes.error);
@@ -78,6 +80,7 @@ export default function AdminDashboard() {
       if (kpisRes.error) console.error('Lỗi tải kpis:', kpisRes.error);
       if (schedulesRes.error) console.error('Lỗi tải schedules:', schedulesRes.error);
       if (programsRes.error) console.error('Lỗi tải programs:', programsRes.error);
+      if (rolesRes.error) console.error('Lỗi tải roles:', rolesRes.error);
 
       return {
         shops: shopsRes.data || [],
@@ -89,7 +92,8 @@ export default function AdminDashboard() {
         profiles: profilesRes.data || [],
         kpis: kpisRes.data || [],
         schedules: schedulesRes.data || [],
-        programs: programsRes.data || []
+        programs: programsRes.data || [],
+        roles: rolesRes.data || []
       } as MasterData;
     },
     retry: false
@@ -531,7 +535,10 @@ export default function AdminDashboard() {
           <select value={selectedManagerInput} onChange={e => setSelectedManagerInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
             <option value="">-- Tất cả Quản lý --</option>
             {masterData?.profiles
-              .filter(p => masterData.profiles.some(sub => sub.manager_id === p.id))
+              .filter(p => {
+                const roleName = masterData.roles?.find(r => r.role_id === p.role)?.role_name || '';
+                return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
+              })
               .map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
           </select>
         </div>
