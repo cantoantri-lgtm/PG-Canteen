@@ -87,12 +87,23 @@ export default function PGDashboard() {
 
   // --- FETCH DATA TỪ DATABASE ---
 
+  // 0. Lấy thông tin mới nhất của PG từ DB để lấy manager_id chính xác
+  const { data: pgProfile } = useQuery({
+    queryKey: ['pg_profile', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return null;
+      const { data } = await supabase.from('profiles').select('manager_id').eq('id', user.id).single();
+      return data;
+    },
+    enabled: !!user?.id,
+  });
+
   // 1. Lấy danh sách Cửa hàng của PG
   const { data: shops = [] } = useQuery({
     queryKey: ['pg_shops', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data } = await supabase.from('schedules').select('shop_id, program_id, shops(shop_name, latitude, longitude, allowed_distance), programs(require_bill_image)').eq('pg_id', user.id);
+      const { data } = await supabase.from('schedules').select('shop_id, program_id, created_by, shops(shop_name, latitude, longitude, allowed_distance), programs(require_bill_image)').eq('pg_id', user.id);
       const uniqueShops = new Map();
       data?.forEach((item: any) => { if (item.shop_id) uniqueShops.set(item.shop_id, item); });
       return Array.from(uniqueShops.values());
@@ -254,14 +265,16 @@ export default function PGDashboard() {
 
   // 5. Lấy tồn kho hiện tại của cửa hàng (Chỉ lấy của người quản lý trực tiếp)
   const { data: inventoryData = [] } = useQuery({
-    queryKey: ['shop_inventory', selectedShopId, user?.manager_id],
+    queryKey: ['shop_inventory', selectedShopId, pgProfile?.manager_id],
     queryFn: async () => {
-      if (!selectedShopId || !user?.manager_id) return [];
+      const supId = pgProfile?.manager_id;
+
+      if (!selectedShopId || !supId) return [];
       
       const { data, error } = await supabase
         .from('inventories')
         .select('product_id, quantity')
-        .eq('sup_id', user.manager_id);
+        .eq('sup_id', supId);
         
       if (error) {
         console.error('Lỗi tải tồn kho:', error);
@@ -269,7 +282,7 @@ export default function PGDashboard() {
       }
       return data;
     },
-    enabled: !!selectedShopId && !!user?.manager_id,
+    enabled: !!selectedShopId && !!pgProfile?.manager_id,
   });
 
   // --- USE EFFECTS LÀM MƯỢT FORM ---
