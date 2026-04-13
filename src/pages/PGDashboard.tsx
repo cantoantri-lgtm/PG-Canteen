@@ -939,9 +939,9 @@ export default function PGDashboard() {
                   </div>
                   
                   <label className="block mt-3 text-xs font-semibold text-gray-700 mb-1">Chọn sản phẩm đúng:</label>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <select 
-                      className="flex-1 p-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500"
+                      className="w-full sm:flex-1 min-w-0 overflow-hidden text-ellipsis p-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-indigo-500"
                       value={item.selected_product_id}
                       onChange={(e) => {
                         const newItems = [...pendingOcrItems];
@@ -962,7 +962,7 @@ export default function PGDashboard() {
                         setManualProductGroup('');
                         setManualProductId('');
                       }}
-                      className="px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-200 transition-colors whitespace-nowrap"
+                      className="w-full sm:w-auto px-3 py-2 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-medium hover:bg-indigo-200 transition-colors whitespace-nowrap"
                     >
                       Tìm khác...
                     </button>
