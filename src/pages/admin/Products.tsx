@@ -1,9 +1,9 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Edit2, Trash2, Save, X } from 'lucide-react';
+import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -30,9 +30,10 @@ interface Product {
   product_id: string;
   product_name: string;
   product_group_id: string;
+  product_group: string; // Đã thêm trường này dựa theo DB schema
   value: number;
   item_type: 'NORMAL_PRODUCT' | 'Quà tặng' | 'Mẫu thử';
-  product_group?: { 
+  product_group_rel?: { // Đổi tên để không trùng với cột text product_group
     name: string, 
     brands?: { 
       brand_name: string, 
@@ -46,7 +47,6 @@ interface Product {
 }
 
 export default function Products() {
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
@@ -60,6 +60,7 @@ export default function Products() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('');
   
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -95,11 +96,11 @@ export default function Products() {
   });
 
   const { data: products = [], isLoading: loadingProducts } = useQuery({
-    queryKey: ['products'],
+    queryKey: ['products_simple'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('products')
-        .select('*, product_group(name, brands(brand_name, brand_id, categories(id, name)))')
+        .select('*')
         .order('product_name');
       if (error) throw error;
       return data as Product[];
@@ -112,28 +113,34 @@ export default function Products() {
   useRealtimeSync(useMemo(() => ({ table: 'product_group', queryKey: ['product_groups'], idColumn: 'id' }), []));
   useRealtimeSync(useMemo(() => ({
     table: 'products',
-    queryKey: ['products'],
+    queryKey: ['products_simple'],
     idColumn: 'product_id',
-    selectQuery: '*, product_group(name, brands(brand_name, brand_id, categories(id, name)))'
+    selectQuery: '*'
   }), []));
 
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
-      const matchesSearch = p.product_name?.toLowerCase().includes(searchQuery.toLowerCase()) || p.product_group?.name?.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesBrand = selectedBrandFilter === '' || p.product_group?.brands?.brand_id === selectedBrandFilter;
-      return matchesSearch && matchesBrand;
+      const pg = productGroups.find(g => g.id === p.product_group_id);
+      const matchesSearch = p.product_name?.toLowerCase().includes(searchQuery.toLowerCase()) || pg?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesBrand = selectedBrandFilter === '' || pg?.brand_id === selectedBrandFilter;
+      const matchesType = selectedTypeFilter === '' || p.item_type === selectedTypeFilter;
+      return matchesSearch && matchesBrand && matchesType;
     });
-  }, [products, searchQuery, selectedBrandFilter]);
+  }, [products, productGroups, searchQuery, selectedBrandFilter, selectedTypeFilter]);
 
   const uniqueBrands = useMemo(() => {
     const brandsMap = new Map();
     products.forEach(p => {
-      if (p.product_group?.brands?.brand_id) {
-        brandsMap.set(p.product_group.brands.brand_id, p.product_group.brands.brand_name);
+      const pg = productGroups.find(g => g.id === p.product_group_id);
+      if (pg?.brand_id) {
+        const brand = brands.find(b => b.brand_id === pg.brand_id);
+        if (brand) {
+          brandsMap.set(brand.brand_id, brand.brand_name);
+        }
       }
     });
     return Array.from(brandsMap.entries()).map(([id, name]) => ({ id, name }));
-  }, [products]);
+  }, [products, productGroups, brands]);
 
   // 3. Mutations (Chỉ Đẩy dữ liệu lên Supabase, UI sẽ tự cập nhật qua Realtime)
   const saveMutation = useMutation({
@@ -144,6 +151,7 @@ export default function Products() {
           .insert([payload])
           .select()
           .single();
+ 
         if (error) throw error;
         return data as Product;
       } else {
@@ -153,12 +161,12 @@ export default function Products() {
           .eq('product_id', editForm.product_id)
           .select()
           .single();
+     
         if (error) throw error;
         return data as Product;
       }
     },
     onSuccess: (_, variables) => {
-      // KHÔNG TỰ CẬP NHẬT CACHE NỮA - Realtime sẽ lo việc đó
       toast.success(isAdding ? 'Thêm sản phẩm thành công!' : 'Cập nhật sản phẩm thành công!');
       
       if (variables.isKeepOpen) {
@@ -181,7 +189,6 @@ export default function Products() {
       return id;
     },
     onSuccess: () => {
-      // KHÔNG TỰ CẬP NHẬT CACHE NỮA - Realtime sẽ lo việc đó
       toast.success('Đã xóa sản phẩm!');
     },
     onError: (error: any) => {
@@ -192,7 +199,7 @@ export default function Products() {
   // 4. Handlers
   const handleAdd = () => {
     setIsAdding(true);
-    setEditForm({ value: 0, item_type: 'NORMAL_PRODUCT' }); 
+    setEditForm({ value: 0, item_type: 'NORMAL_PRODUCT' });
     setSelectedCategory(null);
     setSelectedBrand(null);
     setSelectedProductGroup(null);
@@ -202,13 +209,15 @@ export default function Products() {
   const handleEdit = (product: Product) => {
     setIsAdding(false);
     setEditForm(product);
-    
-    if (product.product_group) {
-      setSelectedProductGroup({ value: product.product_group_id, label: product.product_group.name });
-      if (product.product_group.brands) {
-        setSelectedBrand({ value: product.product_group.brands.brand_id, label: product.product_group.brands.brand_name });
-        if (product.product_group.brands.categories) {
-          setSelectedCategory({ value: product.product_group.brands.categories.id, label: product.product_group.brands.categories.name });
+    const pg = productGroups.find(g => g.id === product.product_group_id);
+    if (pg) {
+      setSelectedProductGroup({ value: pg.id, label: pg.name });
+      const brand = brands.find(b => b.brand_id === pg.brand_id);
+      if (brand) {
+        setSelectedBrand({ value: brand.brand_id, label: brand.brand_name });
+        const category = categories.find(c => c.id === brand.category_id);
+        if (category) {
+          setSelectedCategory({ value: category.id, label: category.name });
         } else {
           setSelectedCategory(null);
         }
@@ -273,9 +282,11 @@ export default function Products() {
         finalProductGroupId = newPg.id;
       }
 
+      // ĐÃ CHỈNH SỬA: Thêm trường product_group vào payload
       const payload = {
         product_name: editForm.product_name?.trim() || null,
         product_group_id: finalProductGroupId,
+        product_group: selectedProductGroup.label, // Cột bắt buộc theo DB schema
         value: editForm.value || 0,
         item_type: (editForm.item_type as 'NORMAL_PRODUCT' | 'Quà tặng' | 'Mẫu thử') || 'NORMAL_PRODUCT',
       };
@@ -341,6 +352,19 @@ export default function Products() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo loại</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedTypeFilter}
+            onChange={(e) => setSelectedTypeFilter(e.target.value)}
+          >
+            <option value="">Tất cả loại</option>
+            <option value="NORMAL_PRODUCT">Sản phẩm thường</option>
+            <option value="Quà tặng">Quà tặng</option>
+            <option value="Mẫu thử">Mẫu thử</option>
+          </select>
+        </div>
         <div className="w-full sm:w-64">
           <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo thương hiệu</label>
           <select
@@ -370,11 +394,14 @@ export default function Products() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredProducts.map((product) => (
+                  {filteredProducts.map((product) => {
+                    const pg = productGroups.find(g => g.id === product.product_group_id);
+                    const brand = pg ? brands.find(b => b.brand_id === pg.brand_id) : null;
+                    return (
                     <tr key={product.product_id}>
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{product.product_group?.name}</td>
+                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{pg?.name}</td>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-500 sm:pl-6">{product.product_name || '-'}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{product.product_group?.brands?.brand_name}</td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{brand?.brand_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                           product.item_type === 'Quà tặng' ? 'bg-pink-100 text-pink-800' :
@@ -392,7 +419,7 @@ export default function Products() {
                         <button onClick={() => handleDelete(product.product_id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
             </div>
@@ -462,7 +489,7 @@ export default function Products() {
             <h3 className="text-sm font-bold text-gray-800 uppercase tracking-wider mb-2">Chi tiết sản phẩm</h3>
             
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tên Sản phẩm (Chi tiết)</label>
+               <label className="block text-sm font-medium text-gray-700 mb-1">Tên Sản phẩm (Chi tiết)</label>
               <input 
                 type="text" 
                 ref={inputRef}

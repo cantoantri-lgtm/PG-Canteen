@@ -106,7 +106,7 @@ export default function Promotions() {
   });
 
   const { data: brands = [] } = useQuery({
-    queryKey: ['brands_list'],
+    queryKey: ['brands'],
     queryFn: async () => {
       const { data, error } = await supabase.from('brands').select('*').order('brand_name');
       if (error) throw error;
@@ -115,9 +115,18 @@ export default function Promotions() {
   });
 
   const { data: products = [] } = useQuery({
-    queryKey: ['products_list'],
+    queryKey: ['products_simple'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('products').select('*, brands(brand_name)').order('product_name');
+      const { data, error } = await supabase.from('products').select('*').order('product_name');
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  const { data: productGroups = [] } = useQuery({
+    queryKey: ['product_groups'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('product_group').select('*');
       if (error) throw error;
       return data;
     }
@@ -130,7 +139,7 @@ export default function Promotions() {
       if (error) throw error;
       
       const promotionsWithDetails = await Promise.all((data as Promotion[]).map(async (p) => {
-        const { data: tiersData } = await supabase.from('promotion_tiers').select('*, products:gift_product_id(product_name)').eq('promotion_id', p.promotion_id);
+        const { data: tiersData } = await supabase.from('promotion_tiers').select('*, products:gift_product_id(product_name, product_group(name))').eq('promotion_id', p.promotion_id);
         const rawTiers = await Promise.all((tiersData || []).map(async (t) => {
           const { data: conditionsData } = await supabase.from('promotion_conditions').select('*').eq('tier_id', t.id);
           return { ...t, conditions: conditionsData || [] };
@@ -142,6 +151,8 @@ export default function Promotions() {
         for (const t of rawTiers) {
           // Bổ sung is_ontop vào khóa map để tránh gộp nhầm các tier khác thuộc tính này
           const key = `${t.tier_name}|${t.tier_type}|${t.support_amount}|${t.min_total_qty}|${t.override_end_date}|${t.is_ontop}`;
+          const fallbackProductName = t.products?.product_name || (t.products as any)?.product_group?.name || 'Sản phẩm không xác định';
+          
           if (tierMap.has(key)) {
             const existing = tierMap.get(key)!;
             if (t.gift_product_id) {
@@ -149,7 +160,7 @@ export default function Promotions() {
               existing.gifts.push({
                 gift_product_id: t.gift_product_id,
                 gift_quantity: t.gift_quantity,
-                product_name: t.products?.product_name
+                product_name: fallbackProductName
               });
             }
           } else {
@@ -158,7 +169,7 @@ export default function Promotions() {
               newTier.gifts!.push({
                 gift_product_id: t.gift_product_id,
                 gift_quantity: t.gift_quantity,
-                product_name: t.products?.product_name
+                product_name: fallbackProductName
               });
             }
             tierMap.set(key, newTier);
@@ -785,10 +796,11 @@ export default function Promotions() {
                             <option value="">Chọn sản phẩm quà tặng</option>
                             {products
                               .filter((p: any) => {
-                                const isGiftOrSample = p.item_type === 'Quà tặng' || p.item_type === 'Mẫu thử';
+                                const itemType = p.item_type?.trim();
+                                const isGiftOrSample = itemType === 'Quà tặng' || itemType === 'Mẫu thử';
                                 if (!isGiftOrSample) return false;
                                 
-                                const brandConditions = tier.conditions.filter(c => c.condition_type === 'Nhãn hàng');
+                                const brandConditions = (tier.conditions || []).filter(c => c.condition_type === 'Nhãn hàng');
                                 if (brandConditions.length === 0) return true;
 
                                 const allowedBrands = brandConditions.flatMap(c => {
@@ -797,11 +809,18 @@ export default function Promotions() {
                                   return [];
                                 });
 
-                                return allowedBrands.includes(p.brands?.brand_name);
+                                if (allowedBrands.length === 0) return true;
+
+                                const pg = productGroups.find((g: any) => g.id === p.product_group_id);
+                                const brand = pg ? brands.find((b: any) => b.brand_id === pg.brand_id) : null;
+                                const brandName = brand?.brand_name || '';
+
+                                return allowedBrands.includes(brandName);
                               })
-                              .map((p: any) => (
-                                <option key={p.product_id} value={p.product_id}>{p.product_name}</option>
-                              ))
+                              .map((p: any) => {
+                                const pg = productGroups.find((g: any) => g.id === p.product_group_id);
+                                return <option key={p.product_id} value={p.product_id}>{p.product_name || pg?.name || 'Sản phẩm không xác định'}</option>
+                              })
                             }
                           </select>
                         </div>
@@ -1057,33 +1076,37 @@ export default function Promotions() {
               </div>
             ) : (
               <div className="divide-y">
-                {products.map((p: any) => (
-                  <label key={p.product_id} className="flex items-center p-3 hover:bg-gray-50 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      className="rounded text-indigo-600 mr-3"
-                      checked={(() => {
-                        const val = editForm.tiers?.[activeTierIdx!]?.conditions[activeCondIdx!]?.target_values;
-                        const currentValues = Array.isArray(val) ? val : (val || '').split(',').map(v => v.trim()).filter(Boolean);
-                        return currentValues.includes(p.product_name);
-                      })()}
-                      onChange={(e) => {
-                        const val = editForm.tiers?.[activeTierIdx!]?.conditions[activeCondIdx!]?.target_values;
-                        const currentValues = Array.isArray(val) ? val : (val || '').split(',').map(v => v.trim()).filter(Boolean);
-                        let newValues;
-                        if (e.target.checked) {
-                          newValues = [...currentValues, p.product_name];
-                        } else {
-                          newValues = currentValues.filter(v => v !== p.product_name);
-                        }
-                        const newTiers = [...(editForm.tiers || [])];
-                        newTiers[activeTierIdx!].conditions[activeCondIdx!].target_values = newValues.join(', ');
-                        setEditForm({...editForm, tiers: newTiers});
-                      }}
-                    />
-                    <span className="text-sm text-gray-700">{p.product_name}</span>
-                  </label>
-                ))}
+                {products.map((p: any) => {
+                  const pg = productGroups.find((g: any) => g.id === p.product_group_id);
+                  const productName = p.product_name || pg?.name || 'Sản phẩm không xác định';
+                  return (
+                    <label key={p.product_id} className="flex items-center p-3 hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded text-indigo-600 mr-3"
+                        checked={(() => {
+                          const val = editForm.tiers?.[activeTierIdx!]?.conditions[activeCondIdx!]?.target_values;
+                          const currentValues = Array.isArray(val) ? val : (val || '').split(',').map(v => v.trim()).filter(Boolean);
+                          return currentValues.includes(productName);
+                        })()}
+                        onChange={(e) => {
+                          const val = editForm.tiers?.[activeTierIdx!]?.conditions[activeCondIdx!]?.target_values;
+                          const currentValues = Array.isArray(val) ? val : (val || '').split(',').map(v => v.trim()).filter(Boolean);
+                          let newValues;
+                          if (e.target.checked) {
+                            newValues = [...currentValues, productName];
+                          } else {
+                            newValues = currentValues.filter(v => v !== productName);
+                          }
+                          const newTiers = [...(editForm.tiers || [])];
+                          newTiers[activeTierIdx!].conditions[activeCondIdx!].target_values = newValues.join(', ');
+                          setEditForm({...editForm, tiers: newTiers});
+                        }}
+                      />
+                      <span className="text-sm text-gray-700">{productName}</span>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>

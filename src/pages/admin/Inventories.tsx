@@ -30,22 +30,46 @@ export default function Inventories() {
   const { data: profiles = [] } = useQuery({
     queryKey: ['profiles'],
     queryFn: async () => {
-      const { data: roles } = await supabase.from('roles').select('*');
-      const { data, error } = await supabase.from('profiles').select('*').order('full_name');
-      if (error) throw error;
-      
-      // Filter to only show Admin or SUP
-      return (data || []).filter(p => {
-        const roleName = roles?.find(r => r.role_id === p.role)?.role_name || '';
-        return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
-      });
+      // 1. Lấy role_id của chức danh 'SUP' từ bảng roles
+      const { data: roleData, error: roleError } = await supabase
+        .from('roles')
+        .select('role_id')
+        .eq('role_name', 'SUP')
+        .single();
+
+      if (roleError || !roleData) {
+        console.error("Lỗi khi lấy role_id của SUP:", roleError);
+        return [];
+      }
+
+      // 2. Lấy danh sách profiles có chứa role_id của SUP
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('role_id', roleData.role_id)
+        .order('full_name');
+
+      if (error) {
+        console.error("Lỗi khi lấy danh sách profiles:", error);
+        throw error;
+      }
+      return data;
     }
   });
 
   const { data: products = [] } = useQuery({
-    queryKey: ['products'],
+    queryKey: ['products_simple'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('products').select('*').order('product_name');
+      const { data, error } = await supabase.from('products').select('product_id, product_name, product_group_id').order('product_name');
+      if (error) throw error;
+      return data;
+    }
+  });
+
+  const { data: productGroups = [] } = useQuery({
+    queryKey: ['product_groups'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('product_group').select('id, name, brand_id');
       if (error) throw error;
       return data;
     }
@@ -54,7 +78,7 @@ export default function Inventories() {
   const { data: brands = [] } = useQuery({
     queryKey: ['brands'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('brands').select('*').order('brand_name');
+      const { data, error } = await supabase.from('brands').select('brand_id, brand_name');
       if (error) throw error;
       return data;
     }
@@ -63,26 +87,29 @@ export default function Inventories() {
   const { data: inventories = [], isLoading } = useQuery({
     queryKey: ['inventories'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('inventories').select('*, profiles(full_name), products(product_name)').order('last_updated', { ascending: false });
+      // ĐÃ SỬA: 'inventory' -> 'inventories'
+      const { data, error } = await supabase
+        .from('inventories')
+        .select(`
+          *,
+          profiles:sup_id (full_name),
+          products:product_id (product_name)
+        `)
+        .order('last_updated', { ascending: false });
       if (error) throw error;
       return data as Inventory[];
     }
   });
 
-  const inventorySyncConfig = useMemo(() => ({
-    table: 'inventories',
-    queryKey: ['inventories'],
-    idColumn: 'id'
-  }), []);
-
-  useRealtimeSync(inventorySyncConfig);
+  // ĐÃ SỬA: table: 'inventory' -> table: 'inventories'
+  useRealtimeSync(useMemo(() => ({ table: 'inventories', queryKey: ['inventories'], idColumn: 'id', selectQuery: '*, profiles:sup_id(full_name), products:product_id(product_name)' }), []));
 
   const filteredInventories = useMemo(() => {
-    return inventories.filter(i => {
-      const matchesSearch = (i.profiles?.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
-                           (i.products?.product_name || '').toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesSup = selectedSupFilter === '' || i.sup_id === selectedSupFilter;
-      const matchesProduct = selectedProductFilter === '' || i.product_id === selectedProductFilter;
+    return inventories.filter(inv => {
+      const matchesSearch = inv.products?.product_name?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                            inv.profiles?.full_name?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSup = selectedSupFilter === '' || inv.sup_id === selectedSupFilter;
+      const matchesProduct = selectedProductFilter === '' || inv.product_id === selectedProductFilter;
       return matchesSearch && matchesSup && matchesProduct;
     });
   }, [inventories, searchQuery, selectedSupFilter, selectedProductFilter]);
@@ -90,40 +117,37 @@ export default function Inventories() {
   const saveMutation = useMutation({
     mutationFn: async ({ payload }: { payload: any; isKeepOpen: boolean }) => {
       if (isAdding) {
-        const { error } = await supabase.from('inventories').insert([payload]);
+        // ĐÃ SỬA: 'inventory' -> 'inventories'
+        const { data, error } = await supabase.from('inventories').insert([payload]).select().single();
         if (error) throw error;
-        return payload;
+        return data;
       } else {
-        const { error } = await supabase.from('inventories').update(payload).eq('id', editForm.id);
+        // ĐÃ SỬA: 'inventory' -> 'inventories'
+        const { data, error } = await supabase.from('inventories').update(payload).eq('id', editForm.id).select().single();
         if (error) throw error;
-        return payload;
+        return data;
       }
     },
     onSuccess: (_, variables) => {
-      toast.success(isAdding ? 'Thêm inventory thành công!' : 'Cập nhật inventory thành công!');
-      if (variables.isKeepOpen && isAdding) {
-        setEditForm({ sup_id: '', product_id: '', quantity: 0 });
+      toast.success(isAdding ? 'Thêm tồn kho thành công!' : 'Cập nhật tồn kho thành công!');
+      if (variables.isKeepOpen) {
+        setEditForm(prev => ({ ...prev, quantity: 0 }));
       } else {
         setIsModalOpen(false);
       }
     },
-    onError: (error: any) => {
-      toast.error(`Không thể lưu: ${error.message}`);
-    }
+    onError: (error: any) => toast.error(`Lỗi: ${error.message}`)
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      // ĐÃ SỬA: 'inventory' -> 'inventories'
       const { error } = await supabase.from('inventories').delete().eq('id', id);
       if (error) throw error;
       return id;
     },
-    onSuccess: () => {
-      toast.success('Đã xóa inventory!');
-    },
-    onError: (error: any) => {
-      toast.error(`Lỗi khi xóa: ${error.message}`);
-    }
+    onSuccess: () => toast.success('Đã xóa tồn kho!'),
+    onError: (error: any) => toast.error(`Lỗi khi xóa: ${error.message}`)
   });
 
   const handleAdd = () => {
@@ -133,106 +157,68 @@ export default function Inventories() {
     setIsModalOpen(true);
   };
 
-  const handleEdit = (inventory: Inventory) => {
+  const handleEdit = (inv: Inventory) => {
     setIsAdding(false);
-    setEditForm(inventory);
-    
-    // Find the brand of the product being edited
-    const product = products.find((p: any) => p.product_id === inventory.product_id);
-    if (product) {
-      setSelectedModalBrand(product.brand_id || '');
-    } else {
-      setSelectedModalBrand('');
-    }
-    
+    setEditForm(inv);
+    const prod = products.find(p => p.product_id === inv.product_id);
+    const pg = prod ? productGroups.find(g => g.id === prod.product_group_id) : null;
+    setSelectedModalBrand(pg ? pg.brand_id : '');
     setIsModalOpen(true);
   };
 
-  const handleSave = (isKeepOpen = false) => {
-    if (!editForm.sup_id || !editForm.product_id) {
-      toast.error("Vui lòng chọn SUP và Sản phẩm.");
+  const handleSave = async (isKeepOpen = false) => {
+    if (!editForm.product_id) {
+      toast.error("Vui lòng chọn sản phẩm.");
+      return;
+    }
+    if (!editForm.sup_id) {
+      toast.error("Vui lòng chọn Supervisor.");
       return;
     }
 
-    const payload = {
-      sup_id: editForm.sup_id,
-      product_id: editForm.product_id,
-      quantity: Number(editForm.quantity) || 0,
-      last_updated: new Date().toISOString()
-    };
+    try {
+      const payload = {
+        sup_id: editForm.sup_id,
+        product_id: editForm.product_id,
+        quantity: editForm.quantity || 0,
+      };
 
-    saveMutation.mutate({ payload, isKeepOpen });
-  };
-
-  const handleDelete = (id: string) => {
-    setDeleteId(id);
-  };
-
-  const confirmDelete = () => {
-    if (deleteId) {
-      deleteMutation.mutate(deleteId);
-      setDeleteId(null);
+      saveMutation.mutate({ payload, isKeepOpen });
+    } catch (err: any) {
+      console.error(err);
+      toast.error(`Lỗi lưu dữ liệu liên quan: ${err.message}`);
     }
   };
 
   const isSaving = saveMutation.isPending;
 
-  if (isLoading) return <div className="p-8 text-center text-indigo-600 font-semibold animate-pulse">Đang tải danh sách inventory...</div>;
+  if (isLoading) return <div className="p-8 text-center">Đang tải dữ liệu tồn kho...</div>;
 
   return (
     <div className="space-y-6">
       <div className="sm:flex sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Quản lý Tồn kho</h2>
+        <h2 className="text-2xl font-bold text-gray-900">Kho hàng Supervisor</h2>
         <button
           onClick={handleAdd}
-          className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 sm:w-auto"
+          className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700"
         >
           <Plus className="-ml-1 mr-2 h-5 w-5" />
           Thêm Tồn kho
         </button>
       </div>
 
-      {/* 🔥 STATS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
-          <p className="text-sm text-gray-500">Tổng sản phẩm</p>
-          <p className="text-2xl font-bold">{inventories.length}</p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
-          <p className="text-sm text-gray-500">Tổng tồn kho</p>
-          <p className="text-2xl font-bold">
-            {inventories.reduce((sum, i) => sum + i.quantity, 0)}
-          </p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
-          <p className="text-sm text-gray-500">Sắp hết</p>
-          <p className="text-2xl font-bold text-red-500">
-            {inventories.filter(i => i.quantity < 10).length}
-          </p>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl shadow-sm border">
-          <p className="text-sm text-gray-500">Ổn định</p>
-          <p className="text-2xl font-bold text-green-600">
-            {inventories.filter(i => i.quantity >= 50).length}
-          </p>
-        </div>
-      </div>
-
       <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
         <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm tồn kho</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tìm kiếm</label>
           <input
             type="text"
-            placeholder="Nhập tên SUP hoặc sản phẩm..."
+            placeholder="Tìm theo sản phẩm hoặc SUP..."
             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <div className="w-full sm:w-64">
+        <div className="w-full sm:w-48">
           <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo SUP</label>
           <select
             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
@@ -240,7 +226,7 @@ export default function Inventories() {
             onChange={(e) => setSelectedSupFilter(e.target.value)}
           >
             <option value="">Tất cả SUP</option>
-            {profiles.map((p: any) => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+            {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
           </select>
         </div>
         <div className="w-full sm:w-64">
@@ -251,7 +237,7 @@ export default function Inventories() {
             onChange={(e) => setSelectedProductFilter(e.target.value)}
           >
             <option value="">Tất cả Sản phẩm</option>
-            {products.map((p: any) => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
+            {products.map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
           </select>
         </div>
       </div>
@@ -263,51 +249,36 @@ export default function Inventories() {
               <table className="min-w-full divide-y divide-gray-300">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Sản phẩm</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">SUP Quản lý</th>
-                    <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Số lượng</th>
-                    <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Trạng thái</th>
+                    <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">Supervisor</th>
+                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Sản phẩm</th>
+                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Số lượng</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Cập nhật lần cuối</th>
-                    <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Thao tác</span></th>
+                    <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredInventories.map((inventory) => {
-                    const status =
-                      inventory.quantity < 10
-                        ? { label: 'Sắp hết', color: 'red' }
-                        : inventory.quantity < 50
-                        ? { label: 'Trung bình', color: 'yellow' }
-                        : { label: 'Còn nhiều', color: 'green' };
-
-                    return (
-                      <tr key={inventory.id}>
-                        <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{inventory.products?.product_name}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{inventory.profiles?.full_name}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900 text-right font-bold">{inventory.quantity}</td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
-                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            status.color === 'red' ? 'bg-red-100 text-red-800' :
-                            status.color === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-green-100 text-green-800'
-                          }`}>
-                            {status.label}
-                          </span>
-                        </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{new Date(inventory.last_updated).toLocaleString()}</td>
-                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                          <button onClick={() => handleEdit(inventory)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
-                          <button onClick={() => handleDelete(inventory.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {filteredInventories.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                        Không tìm thấy tồn kho nào.
+                  {filteredInventories.map((inv) => (
+                    <tr key={inv.id}>
+                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
+                        {inv.profiles?.full_name || 'Không xác định'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                        {inv.products?.product_name || 'Sản phẩm đã xóa'}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900 font-semibold">
+                        {inv.quantity}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                        {new Date(inv.last_updated).toLocaleString('vi-VN')}
+                      </td>
+                      <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
+                        <button onClick={() => handleEdit(inv)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
+                        <button onClick={() => setDeleteId(inv.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
                       </td>
                     </tr>
+                  ))}
+                  {filteredInventories.length === 0 && (
+                    <tr><td colSpan={5} className="py-8 text-center text-gray-500">Không có dữ liệu tồn kho.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -319,59 +290,60 @@ export default function Inventories() {
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={isAdding ? 'Thêm Tồn kho' : 'Sửa Tồn kho'}>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700">SUP Quản lý</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Supervisor *</label>
             <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
               value={editForm.sup_id || ''}
-              onChange={e => setEditForm({...editForm, sup_id: e.target.value})}
+              onChange={e => setEditForm({ ...editForm, sup_id: e.target.value })}
             >
-              <option value="">Chọn SUP</option>
-              {profiles.map((p: any) => (
-                <option key={p.id} value={p.id}>{p.full_name}</option>
-              ))}
+              <option value="">Chọn Supervisor</option>
+              {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
             </select>
           </div>
-          
+
           <div>
-            <label className="block text-sm font-medium text-gray-700">Nhãn hàng (Lọc sản phẩm)</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Thương hiệu (Lọc sản phẩm)</label>
             <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-gray-50"
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
               value={selectedModalBrand}
               onChange={e => {
                 setSelectedModalBrand(e.target.value);
-                setEditForm({...editForm, product_id: ''}); // Reset product when brand changes
+                setEditForm({ ...editForm, product_id: '' });
               }}
             >
-              <option value="">-- Tất cả Nhãn hàng --</option>
-              {brands.map((b: any) => (
-                <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>
-              ))}
+              <option value="">Tất cả Thương hiệu</option>
+              {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Sản phẩm</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Sản phẩm *</label>
             <select
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
               value={editForm.product_id || ''}
-              onChange={e => setEditForm({...editForm, product_id: e.target.value})}
+              onChange={e => setEditForm({ ...editForm, product_id: e.target.value })}
+              disabled={products.length === 0}
             >
               <option value="">Chọn Sản phẩm</option>
               {products
-                .filter((p: any) => !selectedModalBrand || p.brand_id === selectedModalBrand)
-                .map((p: any) => (
-                <option key={p.product_id} value={p.product_id}>{p.product_name}</option>
-              ))}
+                .filter(p => {
+                  if (!selectedModalBrand) return true;
+                  const pg = productGroups.find(g => g.id === p.product_group_id);
+                  return pg && pg.brand_id === selectedModalBrand;
+                })
+                .map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)
+              }
             </select>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">Số lượng</label>
-            <input 
-              type="number" 
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" 
-              value={editForm.quantity || 0} 
-              onChange={e => setEditForm({...editForm, quantity: parseInt(e.target.value) || 0})} 
+            <label className="block text-sm font-medium text-gray-700 mb-1">Số lượng *</label>
+            <input
+              type="number"
+              min="0"
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+              value={editForm.quantity ?? ''}
+              onChange={e => setEditForm({ ...editForm, quantity: Number(e.target.value) })}
             />
           </div>
 
@@ -406,9 +378,9 @@ export default function Inventories() {
       <ConfirmModal
         isOpen={!!deleteId}
         onClose={() => setDeleteId(null)}
-        onConfirm={confirmDelete}
+        onConfirm={() => { if (deleteId) deleteMutation.mutate(deleteId); setDeleteId(null); }}
         title="Xóa Tồn kho"
-        message="Bạn có chắc chắn muốn xóa tồn kho này không? Hành động này không thể hoàn tác."
+        message="Bạn có chắc chắn muốn xóa bản ghi này không?"
       />
     </div>
   );
