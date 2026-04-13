@@ -3,6 +3,9 @@ import { Camera } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { toast } from 'sonner';
 import { matchProduct } from '../services/ocrLearningService';
+import imageCompression from 'browser-image-compression';
+import CameraScanner from './CameraScanner';
+import Tesseract from 'tesseract.js';
 
 interface Product {
   product_id: string;
@@ -45,51 +48,112 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState('');
+  const [showCamera, setShowCamera] = useState(false);
 
-  const handleScanBill = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const processBillFile = async (file: File) => {
     setIsScanning(true);
     setScanProgress(5);
-    setScanStatus('Đang tải ảnh lên...');
+    setScanStatus('Đang nén ảnh...');
     
-    const progressInterval = setInterval(() => {
-      setScanProgress(prev => {
-        if (prev < 30) {
-          setScanStatus('Đang phân tích hình ảnh...');
-          return prev + 5;
-        } else if (prev < 70) {
-          setScanStatus('AI đang đọc dữ liệu...');
-          return prev + 3;
-        } else if (prev < 95) {
-          setScanStatus('Đang trích xuất sản phẩm...');
-          return prev + 1;
-        }
-        return prev;
-      });
-    }, 400);
+    let progressInterval: NodeJS.Timeout;
 
     try {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      await new Promise((resolve) => (reader.onload = resolve));
-      const base64Data = (reader.result as string).split(',')[1];
-
-      const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
-      if (!apiKey || apiKey === "") {
-        toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
-        clearInterval(progressInterval);
-        setIsScanning(false);
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey });
+      // 1. Nén ảnh ở máy khách
+      const options = {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true
+      };
+      const compressedFile = await imageCompression(file, options);
       
+      setScanProgress(15);
+      setScanStatus('Đang đọc văn bản (OCR)...');
+
+      // 2. Áp dụng On-device OCR
+      const worker = await Tesseract.createWorker('vie');
+      const ret = await worker.recognize(compressedFile);
+      const ocrText = ret.data.text;
+      await worker.terminate();
+
+      setScanProgress(30);
+      setScanStatus('Đang phân tích dữ liệu...');
+
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
       const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang';
+
+      // Thử phân tích nhanh bằng Regex (On-device parsing)
+      const lines = ocrText.split('\n').map(l => l.trim()).filter(Boolean);
+      const localFoundItems: any[] = [];
       
-      // SỬA LỖI 1: Tinh chỉnh lại Prompt, loại bỏ các từ cấm đoán quá mạnh, thêm ví dụ thực tế.
-      const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
+      // Tìm kiếm các sản phẩm trong danh sách bằng cách so khớp chuỗi đơn giản
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].toLowerCase();
+        for (const p of products) {
+          const pName = p.product_name.toLowerCase();
+          if (line.includes(pName) && pName.length > 5) {
+            // Tìm giá ở dòng hiện tại hoặc dòng tiếp theo
+            let price = p.value;
+            let qty = 1;
+            const nextLine = lines[i+1] || '';
+            const numbers = (line + ' ' + nextLine).match(/\d+([.,]\d+)?/g);
+            if (numbers) {
+              // Tìm số gần với giá sản phẩm nhất
+              const prices = numbers.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => n > 1000);
+              if (prices.length > 0) {
+                const closest = prices.reduce((prev, curr) => Math.abs(curr - p.value) < Math.abs(prev - p.value) ? curr : prev);
+                if (Math.abs(closest - p.value) < p.value * 0.5) {
+                  price = closest;
+                }
+              }
+            }
+            localFoundItems.push({
+              raw_name: lines[i],
+              qty: qty,
+              unit_price: price,
+              category: p.category_name || 'Khác'
+            });
+            break; // Đã tìm thấy sản phẩm trên dòng này
+          }
+        }
+      }
+
+      let items = [];
+      
+      // Nếu tìm thấy sản phẩm rõ ràng, sử dụng luôn kết quả local để tiết kiệm API
+      if (localFoundItems.length > 0 && localFoundItems.length >= lines.length * 0.1) {
+        items = localFoundItems;
+        setScanProgress(100);
+        setScanStatus('Hoàn tất (On-device)!');
+      } else {
+        // Nếu không tìm thấy hoặc bill phức tạp, gọi Gemini API
+        progressInterval = setInterval(() => {
+          setScanProgress(prev => {
+            if (prev < 70) {
+              setScanStatus('AI đang đọc dữ liệu...');
+              return prev + 3;
+            } else if (prev < 95) {
+              setScanStatus('Đang trích xuất sản phẩm...');
+              return prev + 1;
+            }
+            return prev;
+          });
+        }, 400);
+
+        const reader = new FileReader();
+        reader.readAsDataURL(compressedFile);
+        await new Promise((resolve) => (reader.onload = resolve));
+        const base64Data = (reader.result as string).split(',')[1];
+
+        const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
+        if (!apiKey || apiKey === "") {
+          toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
+          if (progressInterval) clearInterval(progressInterval);
+          setIsScanning(false);
+          return;
+        }
+        const ai = new GoogleGenAI({ apiKey });
+        
+        const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
 
 NHIỆM VỤ: 
 Trích xuất TẤT CẢ các sản phẩm có trên hóa đơn.
@@ -101,47 +165,48 @@ Cấu trúc hóa đơn thường hiển thị theo cặp dòng:
 - Dòng trên: [Tên Sản Phẩm]
 - Dòng dưới: [Số lượng]      [Đơn giá]      [Thành tiền]
 
-Ví dụ:
-"BVS Diana Sensicool ko canh 8m"
-"2,00      22.000      44.000"
--> Kết quả: raw_name: "BVS Diana Sensicool ko canh 8m", qty: 2, unit_price: 22000, category: "Băng vệ sinh"
+Dưới đây là văn bản thô đã được quét từ hóa đơn (OCR Text) để hỗ trợ bạn:
+"""
+${ocrText}
+"""
 
 ĐỊNH DẠNG ĐẦU RA:
 Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), 'unit_price' (đơn giá), và 'category' (ngành hàng).`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: [
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: file.type,
-            }
-          },
-          promptText
-        ],
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                raw_name: { type: Type.STRING },
-                qty: { type: Type.NUMBER },
-                unit_price: { type: Type.NUMBER },
-                category: { type: Type.STRING }
+        const response = await ai.models.generateContent({
+          model: 'gemini-1.5-flash-8b',
+          contents: [
+            {
+              inlineData: {
+                data: base64Data,
+                mimeType: file.type,
+              }
+            },
+            promptText
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  raw_name: { type: Type.STRING },
+                  qty: { type: Type.NUMBER },
+                  unit_price: { type: Type.NUMBER },
+                  category: { type: Type.STRING }
+                }
               }
             }
           }
-        }
-      });
+        });
 
-      clearInterval(progressInterval);
-      setScanProgress(100);
-      setScanStatus('Hoàn tất!');
+        if (progressInterval) clearInterval(progressInterval);
+        setScanProgress(100);
+        setScanStatus('Hoàn tất!');
 
-      const items = JSON.parse(response.text || '[]');
+        items = JSON.parse(response.text || '[]');
+      }
       
       if (items.length === 0) {
         toast.error('Không tìm thấy sản phẩm mục tiêu nào trong hóa đơn.');
@@ -251,7 +316,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       }
 
     } catch (error: any) {
-      clearInterval(progressInterval);
+      if (progressInterval) clearInterval(progressInterval);
       setIsScanning(false);
       console.error('Lỗi quét hóa đơn:', error);
       
@@ -270,10 +335,22 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
     }
   };
 
+  const handleScanBill = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      await processBillFile(file);
+    }
+  };
+
+  const handleCapture = async (file: File) => {
+    setShowCamera(false);
+    await processBillFile(file);
+  };
+
   return (
     <>
       <button 
-        onClick={() => fileInputRef.current?.click()} 
+        onClick={() => setShowCamera(true)} 
         disabled={isScanning || disabled}
         className="flex-1 bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
       >
@@ -283,11 +360,17 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       <input 
         type="file" 
         accept="image/*" 
-        capture="environment" 
         ref={fileInputRef} 
         onChange={handleScanBill} 
         className="hidden" 
       />
+
+      {showCamera && (
+        <CameraScanner 
+          onCapture={handleCapture} 
+          onClose={() => setShowCamera(false)} 
+        />
+      )}
 
       {isScanning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">

@@ -15,6 +15,7 @@ interface Schedule {
   program_id: string;
   start_date: string;
   end_date: string;
+  created_by?: string;
   profiles: { full_name: string };
   shops: { shop_name: string };
   programs?: { program_name: string };
@@ -37,13 +38,22 @@ export default function Schedules() {
   
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
-  // 1. FETCH DATA
+  // 0. Lấy thông tin user đang đăng nhập (SUP) để gán vào created_by
+  const { data: session } = useQuery({
+    queryKey: ['session'],
+    queryFn: async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session;
+    }
+  });
+
+  // 1. FETCH DATA (Đã fix lỗi !pg_id)
   const { data: schedules = [], isLoading: loadingSchedules } = useQuery({
     queryKey: ['schedules'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('schedules')
-        .select('*, profiles(full_name), shops(shop_name), programs(program_name)')
+        .select('*, profiles!pg_id(full_name), shops(shop_name), programs(program_name)')
         .order('start_date', { ascending: false });
       if (error) throw error;
       return data as Schedule[];
@@ -74,12 +84,12 @@ export default function Schedules() {
     }
   });
 
-  // 2. ĐỒNG BỘ REALTIME
+  // 2. ĐỒNG BỘ REALTIME (Đã fix lỗi !pg_id)
   useRealtimeSync({
     table: 'schedules',
     queryKey: ['schedules'],
     idColumn: 'schedule_id',
-    selectQuery: '*, profiles(full_name), shops(shop_name), programs(program_name)'
+    selectQuery: '*, profiles!pg_id(full_name), shops(shop_name), programs(program_name)'
   });
 
   // 3. GOM NHÓM DỮ LIỆU
@@ -109,14 +119,23 @@ export default function Schedules() {
     return Object.values(groups);
   }, [schedules, searchQuery, selectedPgFilter, selectedShopFilter]);
 
-  // 4. CÁC HÀM XỬ LÝ (MUTATIONS)
+  // 4. CÁC HÀM XỬ LÝ MUTATIONS (Đã fix lỗi !pg_id)
   const saveMutation = useMutation({
     mutationFn: async ({ payload }: { payload: any; isKeepOpen: boolean }) => {
       if (isAdding) {
-        const { data, error } = await supabase.from('schedules').insert([payload]).select('*, profiles(full_name), shops(shop_name), programs(program_name)').single();
+        const { data, error } = await supabase
+          .from('schedules')
+          .insert([payload])
+          .select('*, profiles!pg_id(full_name), shops(shop_name), programs(program_name)')
+          .single();
         if (error) throw error; return data as Schedule;
       } else {
-        const { data, error } = await supabase.from('schedules').update(payload).eq('schedule_id', editForm.schedule_id).select('*, profiles(full_name), shops(shop_name), programs(program_name)').single();
+        const { data, error } = await supabase
+          .from('schedules')
+          .update(payload)
+          .eq('schedule_id', editForm.schedule_id)
+          .select('*, profiles!pg_id(full_name), shops(shop_name), programs(program_name)')
+          .single();
         if (error) throw error; return data as Schedule;
       }
     },
@@ -144,13 +163,21 @@ export default function Schedules() {
   });
 
   const handleSave = (isKeepOpen = false) => {
-    saveMutation.mutate({ 
-      payload: { 
-        pg_id: editForm.pg_id, shop_id: editForm.shop_id, 
-        program_id: editForm.program_id, start_date: editForm.start_date, end_date: editForm.end_date 
-      }, 
-      isKeepOpen 
-    });
+    // Chuẩn bị dữ liệu lưu
+    const payload: any = { 
+      pg_id: editForm.pg_id, 
+      shop_id: editForm.shop_id, 
+      program_id: editForm.program_id, 
+      start_date: editForm.start_date, 
+      end_date: editForm.end_date 
+    };
+
+    // Nếu là thêm mới, tự động gán ID của người tạo (SUP)
+    if (isAdding && session?.user?.id) {
+      payload.created_by = session.user.id;
+    }
+
+    saveMutation.mutate({ payload, isKeepOpen });
   };
 
   const toggleGroup = (programName: string) => {
