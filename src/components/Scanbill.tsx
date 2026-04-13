@@ -4,7 +4,6 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { toast } from 'sonner';
 import { matchProduct } from '../services/ocrLearningService';
 import imageCompression from 'browser-image-compression';
-import CameraScanner from './CameraScanner';
 import Tesseract from 'tesseract.js';
 
 interface Product {
@@ -48,7 +47,6 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState('');
-  const [showCamera, setShowCamera] = useState(false);
 
   const processBillFile = async (file: File) => {
     setIsScanning(true);
@@ -342,15 +340,10 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
     }
   };
 
-  const handleCapture = async (file: File) => {
-    setShowCamera(false);
-    await processBillFile(file);
-  };
-
   return (
     <>
       <button 
-        onClick={() => setShowCamera(true)} 
+        onClick={() => fileInputRef.current?.click()} 
         disabled={isScanning || disabled}
         className="flex-1 bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
       >
@@ -360,17 +353,11 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       <input 
         type="file" 
         accept="image/*" 
+        capture="environment"
         ref={fileInputRef} 
         onChange={handleScanBill} 
         className="hidden" 
       />
-
-      {showCamera && (
-        <CameraScanner 
-          onCapture={handleCapture} 
-          onClose={() => setShowCamera(false)} 
-        />
-      )}
 
       {isScanning && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
