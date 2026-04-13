@@ -188,7 +188,7 @@ ${ocrText}
 Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), 'unit_price' (đơn giá), và 'category' (ngành hàng).`;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-1.5-flash-8b',
+          model: 'gemini-1.5-flash',
           contents: [
             {
               inlineData: {
