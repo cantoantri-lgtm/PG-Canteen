@@ -14,6 +14,7 @@ interface Program {
   end_date: string;
   description: string;
   status: string;
+  require_bill_image?: boolean;
 }
 
 export default function Programs() {
@@ -197,7 +198,8 @@ export default function Programs() {
       start_date: editForm.start_date,
       end_date: editForm.end_date,
       description: editForm.description?.trim() || '',
-      status: editForm.status || 'active'
+      status: editForm.status || 'active',
+      require_bill_image: editForm.require_bill_image || false
     };
 
     saveMutation.mutate({ payload, isKeepOpen });
@@ -253,6 +255,7 @@ export default function Programs() {
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Từ ngày</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Đến ngày</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Trạng thái</th>
+                    <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Bắt buộc chụp Bill</th>
                     <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Thao tác</span></th>
                   </tr>
                 </thead>
@@ -272,6 +275,17 @@ export default function Programs() {
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{program.start_date}</td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{program.end_date}</td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{program.status}</td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500 text-center">
+                          {program.require_bill_image ? (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                              Có
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                              Không
+                            </span>
+                          )}
+                        </td>
                         <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                           <button onClick={() => handleEdit(program)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
                           <button onClick={() => handleDelete(program.program_id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
@@ -392,6 +406,18 @@ export default function Programs() {
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </select>
+          </div>
+          <div className="flex items-center">
+            <input
+              id="require_bill_image"
+              type="checkbox"
+              className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
+              checked={editForm.require_bill_image || false}
+              onChange={e => setEditForm({ ...editForm, require_bill_image: e.target.checked })}
+            />
+            <label htmlFor="require_bill_image" className="ml-2 block text-sm text-gray-900">
+              Bắt buộc chụp ảnh bill
+            </label>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">Mô tả</label>

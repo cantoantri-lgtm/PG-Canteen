@@ -92,7 +92,7 @@ export default function PGDashboard() {
     queryKey: ['pg_shops', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
-      const { data } = await supabase.from('schedules').select('shop_id, program_id, shops(shop_name, latitude, longitude, allowed_distance)').eq('pg_id', user.id);
+      const { data } = await supabase.from('schedules').select('shop_id, program_id, shops(shop_name, latitude, longitude, allowed_distance), programs(require_bill_image)').eq('pg_id', user.id);
       const uniqueShops = new Map();
       data?.forEach((item: any) => { if (item.shop_id) uniqueShops.set(item.shop_id, item); });
       return Array.from(uniqueShops.values());
@@ -526,15 +526,20 @@ export default function PGDashboard() {
   }, [cart, cartTotal, activePromotions, products, selectedShopId]);
 
 
+  const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
+  const requireBillImage = selectedSchedule?.programs?.require_bill_image || false;
+
   // --- MUTATION: LƯU DB (SỬ DỤNG RPC VỚI HEADER-DETAIL) ---
   const submitOrderMutation = useMutation({
     mutationFn: async () => {
       if (!selectedShopId) throw new Error('Vui lòng chọn cửa hàng');
-      if (billImages.length === 0) throw new Error('Vui lòng chụp ít nhất 1 ảnh hóa đơn');
 
-      const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
       const shopData = selectedSchedule?.shops;
       const allowedDistance = shopData?.allowed_distance || 500;
+
+      if (requireBillImage && billImages.length === 0) {
+        throw new Error('Vui lòng chụp ít nhất 1 ảnh hóa đơn');
+      }
 
       if (currentDistance !== null && currentDistance > allowedDistance) {
         throw new Error(`Bạn đang ở quá xa cửa hàng (${Math.round(currentDistance)}m). Khoảng cách cho phép là ${allowedDistance}m.`);
@@ -845,7 +850,7 @@ export default function PGDashboard() {
                   className="w-full py-8 border-2 border-dashed border-indigo-200 rounded-xl flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30"
                 >
                   <Camera className="w-8 h-8 mb-2" />
-                  <span className="text-sm font-medium">Chụp ảnh hóa đơn (Bắt buộc)</span>
+                  <span className="text-sm font-medium">Chụp ảnh hóa đơn {requireBillImage ? '(Bắt buộc)' : '(Tùy chọn)'}</span>
                 </button>
               )}
             </div>

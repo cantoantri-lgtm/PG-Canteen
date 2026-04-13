@@ -62,16 +62,28 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         maxWidthOrHeight: 1920,
         useWebWorker: true
       };
-      const compressedFile = await imageCompression(file, options);
+      let compressedFile: File;
+      try {
+        compressedFile = await imageCompression(file, options);
+      } catch (compressError) {
+        console.warn('Lỗi nén ảnh, sử dụng ảnh gốc:', compressError);
+        compressedFile = file;
+      }
       
       setScanProgress(15);
       setScanStatus('Đang đọc văn bản (OCR)...');
 
-      // 2. Áp dụng On-device OCR
-      const worker = await Tesseract.createWorker('vie');
-      const ret = await worker.recognize(compressedFile);
-      const ocrText = ret.data.text;
-      await worker.terminate();
+      // 2. Áp dụng On-device OCR (Có xử lý lỗi để không làm sập toàn bộ quy trình)
+      let ocrText = '';
+      try {
+        const worker = await Tesseract.createWorker('vie');
+        const ret = await worker.recognize(compressedFile);
+        ocrText = ret.data.text;
+        await worker.terminate();
+      } catch (ocrError) {
+        console.warn('Lỗi On-device OCR (Tesseract), bỏ qua bước này:', ocrError);
+        // Không throw error, tiếp tục dùng Gemini
+      }
 
       setScanProgress(30);
       setScanStatus('Đang phân tích dữ liệu...');
@@ -79,50 +91,54 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
       const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang';
 
-      // Thử phân tích nhanh bằng Regex (On-device parsing)
-      const lines = ocrText.split('\n').map(l => l.trim()).filter(Boolean);
+      // Thử phân tích nhanh bằng Regex (On-device parsing) nếu có ocrText
       const localFoundItems: any[] = [];
-      
-      // Tìm kiếm các sản phẩm trong danh sách bằng cách so khớp chuỗi đơn giản
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].toLowerCase();
-        for (const p of products) {
-          const pName = p.product_name.toLowerCase();
-          if (line.includes(pName) && pName.length > 5) {
-            // Tìm giá ở dòng hiện tại hoặc dòng tiếp theo
-            let price = p.value;
-            let qty = 1;
-            const nextLine = lines[i+1] || '';
-            const numbers = (line + ' ' + nextLine).match(/\d+([.,]\d+)?/g);
-            if (numbers) {
-              // Tìm số gần với giá sản phẩm nhất
-              const prices = numbers.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => n > 1000);
-              if (prices.length > 0) {
-                const closest = prices.reduce((prev, curr) => Math.abs(curr - p.value) < Math.abs(prev - p.value) ? curr : prev);
-                if (Math.abs(closest - p.value) < p.value * 0.5) {
-                  price = closest;
+      let items = [];
+
+      if (ocrText) {
+        const lines = ocrText.split('\n').map(l => l.trim()).filter(Boolean);
+        
+        // Tìm kiếm các sản phẩm trong danh sách bằng cách so khớp chuỗi đơn giản
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i].toLowerCase();
+          for (const p of products) {
+            const pName = p.product_name.toLowerCase();
+            if (line.includes(pName) && pName.length > 5) {
+              // Tìm giá ở dòng hiện tại hoặc dòng tiếp theo
+              let price = p.value;
+              let qty = 1;
+              const nextLine = lines[i+1] || '';
+              const numbers = (line + ' ' + nextLine).match(/\d+([.,]\d+)?/g);
+              if (numbers) {
+                // Tìm số gần với giá sản phẩm nhất
+                const prices = numbers.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => n > 1000);
+                if (prices.length > 0) {
+                  const closest = prices.reduce((prev, curr) => Math.abs(curr - p.value) < Math.abs(prev - p.value) ? curr : prev);
+                  if (Math.abs(closest - p.value) < p.value * 0.5) {
+                    price = closest;
+                  }
                 }
               }
+              localFoundItems.push({
+                raw_name: lines[i],
+                qty: qty,
+                unit_price: price,
+                category: p.category_name || 'Khác'
+              });
+              break; // Đã tìm thấy sản phẩm trên dòng này
             }
-            localFoundItems.push({
-              raw_name: lines[i],
-              qty: qty,
-              unit_price: price,
-              category: p.category_name || 'Khác'
-            });
-            break; // Đã tìm thấy sản phẩm trên dòng này
           }
+        }
+
+        // Nếu tìm thấy sản phẩm rõ ràng, sử dụng luôn kết quả local để tiết kiệm API
+        if (localFoundItems.length > 0 && localFoundItems.length >= lines.length * 0.1) {
+          items = localFoundItems;
+          setScanProgress(100);
+          setScanStatus('Hoàn tất (On-device)!');
         }
       }
 
-      let items = [];
-      
-      // Nếu tìm thấy sản phẩm rõ ràng, sử dụng luôn kết quả local để tiết kiệm API
-      if (localFoundItems.length > 0 && localFoundItems.length >= lines.length * 0.1) {
-        items = localFoundItems;
-        setScanProgress(100);
-        setScanStatus('Hoàn tất (On-device)!');
-      } else {
+      if (items.length === 0) {
         // Nếu không tìm thấy hoặc bill phức tạp, gọi Gemini API
         progressInterval = setInterval(() => {
           setScanProgress(prev => {
@@ -177,7 +193,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
             {
               inlineData: {
                 data: base64Data,
-                mimeType: file.type,
+                mimeType: compressedFile.type || 'image/jpeg',
               }
             },
             promptText
@@ -203,7 +219,16 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
         setScanProgress(100);
         setScanStatus('Hoàn tất!');
 
-        items = JSON.parse(response.text || '[]');
+        let responseText = response.text || '[]';
+        // Clean markdown formatting if present
+        responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        try {
+          items = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('Lỗi parse JSON từ Gemini:', parseError, responseText);
+          throw new Error('Không thể đọc dữ liệu từ AI. Vui lòng thử lại.');
+        }
       }
       
       if (items.length === 0) {
@@ -323,6 +348,8 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
         toast.error('Server đang quá tải. Thử lại sau 5 giây', { duration: 5000 });
       } else if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
         toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút', { duration: 5000 });
+      } else if (errorMsg) {
+        toast.error(errorMsg);
       } else {
         toast.error('Lỗi khi quét hóa đơn. Vui lòng thử lại.');
       }
