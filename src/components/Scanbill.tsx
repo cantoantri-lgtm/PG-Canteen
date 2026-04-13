@@ -189,15 +189,17 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
 
         const response = await ai.models.generateContent({
           model: 'gemini-3-flash-preview',
-          contents: [
-            {
-              inlineData: {
-                data: base64Data,
-                mimeType: compressedFile.type || 'image/jpeg',
-              }
-            },
-            promptText
-          ],
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  data: base64Data,
+                  mimeType: compressedFile.type || 'image/jpeg',
+                }
+              },
+              { text: promptText }
+            ]
+          },
           config: {
             responseMimeType: "application/json",
             responseSchema: {
