@@ -59,7 +59,7 @@ export default function Schedules() {
 
   // 1. FETCH DATA (Đã fix lỗi !pg_id)
   const { data: schedules = [], isLoading: loadingSchedules } = useQuery({
-    queryKey: ['schedules', user?.id, isSup, authLoading],
+    queryKey: ['schedules', user?.id, isSup, authLoading, supPrograms],
     queryFn: async () => {
       if (authLoading) return [];
       let query = supabase
@@ -71,7 +71,10 @@ export default function Schedules() {
       if (error) throw error;
 
       if (isSup && user?.id) {
-        return (data as any[]).filter(s => s.profiles?.manager_id === user.id) as Schedule[];
+        return (data as any[]).filter(s => 
+          s.profiles?.manager_id === user.id && 
+          supPrograms.includes(s.program_id)
+        ) as Schedule[];
       }
       return data as Schedule[];
     },
