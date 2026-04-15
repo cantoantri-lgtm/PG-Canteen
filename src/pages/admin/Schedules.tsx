@@ -7,6 +7,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 interface Schedule {
   schedule_id: string;
@@ -26,6 +27,10 @@ interface Shop { shop_id: string; shop_name: string; }
 interface Program { program_id: string; program_name: string; }
 
 export default function Schedules() {
+  const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Schedule>>({});
@@ -38,32 +43,44 @@ export default function Schedules() {
   
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
 
-  // 0. Lấy thông tin user đang đăng nhập (SUP) để gán vào created_by
-  const { data: session } = useQuery({
-    queryKey: ['session'],
+  const { data: supPrograms = [] } = useQuery({
+    queryKey: ['sup_programs', user?.id],
     queryFn: async () => {
-      const { data } = await supabase.auth.getSession();
-      return data.session;
-    }
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('sup_programs').select('program_id').eq('sup_id', user.id);
+      if (error) throw error;
+      return data.map(sp => sp.program_id);
+    },
+    enabled: isSup && !!user?.id
   });
 
   // 1. FETCH DATA (Đã fix lỗi !pg_id)
   const { data: schedules = [], isLoading: loadingSchedules } = useQuery({
-    queryKey: ['schedules'],
+    queryKey: ['schedules', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('schedules')
-        .select('*, profiles!pg_id(full_name), shops(shop_name), programs(program_name)')
+        .select('*, profiles!pg_id(full_name, manager_id), shops(shop_name), programs(program_name)')
         .order('start_date', { ascending: false });
+        
+      const { data, error } = await query;
       if (error) throw error;
+
+      if (isSup && user?.id) {
+        return (data as any[]).filter(s => s.profiles?.manager_id === user.id) as Schedule[];
+      }
       return data as Schedule[];
     }
   });
 
   const { data: profiles = [] } = useQuery({
-    queryKey: ['profiles'],
+    queryKey: ['profiles', user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name').eq('admin_role', false).order('full_name');
+      let query = supabase.from('profiles').select('id, full_name').eq('admin_role', false).order('full_name');
+      if (isSup && user?.id) {
+        query = query.eq('manager_id', user.id);
+      }
+      const { data } = await query;
       return (data || []) as Profile[];
     }
   });
@@ -77,9 +94,15 @@ export default function Schedules() {
   });
 
   const { data: programs = [] } = useQuery({
-    queryKey: ['programs'],
+    queryKey: ['programs', supPrograms],
     queryFn: async () => {
-      const { data } = await supabase.from('programs').select('program_id, program_name').order('start_date', { ascending: false });
+      let query = supabase.from('programs').select('program_id, program_name').order('start_date', { ascending: false });
+      if (isSup && supPrograms.length > 0) {
+        query = query.in('program_id', supPrograms);
+      } else if (isSup && supPrograms.length === 0) {
+        return [];
+      }
+      const { data } = await query;
       return (data || []) as Program[];
     }
   });
@@ -173,8 +196,8 @@ export default function Schedules() {
     };
 
     // Nếu là thêm mới, tự động gán ID của người tạo (SUP)
-    if (isAdding && session?.user?.id) {
-      payload.created_by = session.user.id;
+    if (isAdding && user?.id) {
+      payload.created_by = user.id;
     }
 
     saveMutation.mutate({ payload, isKeepOpen });

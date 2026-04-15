@@ -1,11 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Plus, Edit2, Trash2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Plus, Edit2, Trash2, ChevronDown, ChevronRight, Check } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 interface Program {
   program_id: string;
@@ -18,6 +19,10 @@ interface Program {
 }
 
 export default function Programs() {
+  const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Program>>({});
@@ -25,7 +30,9 @@ export default function Programs() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [expandedProgramId, setExpandedProgramId] = useState<string | null>(null);
   const [selectedBrandId, setSelectedBrandId] = useState<string>('');
+  const [selectedSupId, setSelectedSupId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [assignSupProgramId, setAssignSupProgramId] = useState<string | null>(null);
 
   const { data: programs = [], isLoading } = useQuery({
     queryKey: ['programs'],
@@ -57,6 +64,73 @@ export default function Programs() {
       return data;
     },
     enabled: !!expandedProgramId
+  });
+
+  const { data: roles = [] } = useQuery({
+    queryKey: ['roles'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('roles').select('*');
+      if (error) throw error;
+      return data;
+    },
+    enabled: isAdmin
+  });
+
+  const { data: supUsers = [] } = useQuery({
+    queryKey: ['sup_users'],
+    queryFn: async () => {
+      const supRole = roles.find((r: any) => r.role_name.toUpperCase() === 'SUP');
+      if (!supRole) return [];
+      const { data, error } = await supabase.from('profiles').select('*').eq('role_id', supRole.role_id);
+      if (error) throw error;
+      return data;
+    },
+    enabled: isAdmin && roles.length > 0
+  });
+
+  const { data: programSups = [] } = useQuery({
+    queryKey: ['program_sups', expandedProgramId, assignSupProgramId],
+    queryFn: async () => {
+      const targetId = assignSupProgramId || expandedProgramId;
+      if (!targetId) return [];
+      const { data, error } = await supabase
+        .from('sup_programs')
+        .select('*')
+        .eq('program_id', targetId);
+      if (error) throw error;
+      return data;
+    },
+    enabled: (!!expandedProgramId || !!assignSupProgramId) && isAdmin
+  });
+
+  const { data: supPrograms = [] } = useQuery({
+    queryKey: ['sup_programs', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('sup_programs').select('program_id').eq('sup_id', user.id);
+      if (error) throw error;
+      return data.map(sp => sp.program_id);
+    },
+    enabled: isSup && !!user?.id
+  });
+
+  const registerProgramMutation = useMutation({
+    mutationFn: async (programId: string) => {
+      if (!user?.id) throw new Error('User ID not found');
+      const { error } = await supabase.from('sup_programs').insert({
+        sup_id: user.id,
+        program_id: programId
+      });
+      if (error) throw error;
+      return programId;
+    },
+    onSuccess: () => {
+      toast.success('Đăng ký chương trình thành công!');
+      queryClient.invalidateQueries({ queryKey: ['sup_programs', user?.id] });
+    },
+    onError: (error: any) => {
+      toast.error(`Lỗi: ${error.message}`);
+    }
   });
 
   const programSyncConfig = useMemo(() => ({
@@ -175,6 +249,47 @@ export default function Programs() {
     }
   });
 
+  const addSupMutation = useMutation({
+    mutationFn: async () => {
+      const targetId = assignSupProgramId || expandedProgramId;
+      if (!targetId || !selectedSupId) return;
+      const { error } = await supabase.from('sup_programs').insert([{
+        program_id: targetId,
+        sup_id: selectedSupId
+      }]);
+      if (error) throw error;
+      return targetId;
+    },
+    onSuccess: (targetId) => {
+      toast.success('Đã thêm SUP vào chương trình!');
+      setSelectedSupId('');
+      queryClient.invalidateQueries({ queryKey: ['program_sups', expandedProgramId, assignSupProgramId] });
+    },
+    onError: (error: any) => {
+      toast.error(`Lỗi: ${error.message}`);
+    }
+  });
+
+  const removeSupMutation = useMutation({
+    mutationFn: async (supId: string) => {
+      const targetId = assignSupProgramId || expandedProgramId;
+      if (!targetId) return;
+      const { error } = await supabase.from('sup_programs')
+        .delete()
+        .eq('program_id', targetId)
+        .eq('sup_id', supId);
+      if (error) throw error;
+      return targetId;
+    },
+    onSuccess: (targetId) => {
+      toast.success('Đã xóa SUP khỏi chương trình!');
+      queryClient.invalidateQueries({ queryKey: ['program_sups', expandedProgramId, assignSupProgramId] });
+    },
+    onError: (error: any) => {
+      toast.error(`Lỗi: ${error.message}`);
+    }
+  });
+
   const handleAdd = () => {
     setIsAdding(true);
     setEditForm({ status: 'active' });
@@ -223,14 +338,16 @@ export default function Programs() {
   return (
     <div className="space-y-6">
       <div className="sm:flex sm:items-center sm:justify-between">
-        <h2 className="text-2xl font-bold text-gray-900">Programs</h2>
-        <button
-          onClick={handleAdd}
-          className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 sm:w-auto"
-        >
-          <Plus className="-ml-1 mr-2 h-5 w-5" />
-          Thêm Program
-        </button>
+        <h2 className="text-2xl font-bold text-gray-900">{isSup ? 'Đăng ký Chương trình' : 'Programs'}</h2>
+        {isAdmin && (
+          <button
+            onClick={handleAdd}
+            className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 sm:w-auto"
+          >
+            <Plus className="-ml-1 mr-2 h-5 w-5" />
+            Thêm Program
+          </button>
+        )}
       </div>
 
       <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -287,58 +404,87 @@ export default function Programs() {
                           )}
                         </td>
                         <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                          <button onClick={() => handleEdit(program)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
-                          <button onClick={() => handleDelete(program.program_id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
+                          {isAdmin && (
+                            <>
+                              <button onClick={() => setAssignSupProgramId(program.program_id)} className="text-green-600 hover:text-green-900 mr-4" title="Phân công SUP">
+                                <svg xmlns="http://www.0w.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                  <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+                                </svg>
+                              </button>
+                              <button onClick={() => handleEdit(program)} className="text-indigo-600 hover:text-indigo-900 mr-4" title="Sửa"><Edit2 className="h-4 w-4" /></button>
+                              <button onClick={() => handleDelete(program.program_id)} className="text-red-600 hover:text-red-900" title="Xóa"><Trash2 className="h-4 w-4" /></button>
+                            </>
+                          )}
+                          {isSup && (
+                            supPrograms.includes(program.program_id) ? (
+                              <span className="inline-flex items-center text-green-600 text-sm font-medium">
+                                <Check className="h-4 w-4 mr-1" />
+                                Đã đăng ký
+                              </span>
+                            ) : (
+                              <button 
+                                onClick={() => registerProgramMutation.mutate(program.program_id)}
+                                disabled={registerProgramMutation.isPending}
+                                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
+                              >
+                                Đăng ký
+                              </button>
+                            )
+                          )}
                         </td>
                       </tr>
                       {expandedProgramId === program.program_id && (
                         <tr>
-                          <td colSpan={5} className="px-6 py-4 bg-gray-50">
+                          <td colSpan={6} className="px-6 py-4 bg-gray-50">
                             <div className="border border-gray-200 rounded-lg p-4 bg-white shadow-sm">
                               <h4 className="text-sm font-medium text-gray-900 mb-3">Nhãn hàng trong chương trình</h4>
                               
-                              <div className="flex items-center space-x-2 mb-4">
-                                <select
-                                  className="block w-64 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
-                                  value={selectedBrandId}
-                                  onChange={(e) => setSelectedBrandId(e.target.value)}
-                                >
-                                  <option value="">-- Chọn nhãn hàng --</option>
-                                  {brands.filter(b => !programBrands.some(pb => pb.brand_id === b.brand_id)).map(brand => (
-                                    <option key={brand.brand_id} value={brand.brand_id}>{brand.brand_name}</option>
-                                  ))}
-                                </select>
-                                <button
-                                  onClick={() => addBrandMutation.mutate()}
-                                  disabled={!selectedBrandId || addBrandMutation.isPending}
-                                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none disabled:opacity-50"
-                                >
-                                  <Plus className="h-4 w-4 mr-1" /> Thêm
-                                </button>
-                                <button
-                                  onClick={() => addAllBrandsMutation.mutate()}
-                                  disabled={addAllBrandsMutation.isPending || brands.length === programBrands.length}
-                                  className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none disabled:opacity-50"
-                                >
-                                  Chọn tất cả
-                                </button>
-                              </div>
+                              {isAdmin && (
+                                <div className="flex items-center space-x-2 mb-4">
+                                  <select
+                                    className="block w-64 rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+                                    value={selectedBrandId}
+                                    onChange={(e) => setSelectedBrandId(e.target.value)}
+                                  >
+                                    <option value="">-- Chọn nhãn hàng --</option>
+                                    {brands.filter(b => !programBrands.some(pb => pb.brand_id === b.brand_id)).map(brand => (
+                                      <option key={brand.brand_id} value={brand.brand_id}>{brand.brand_name}</option>
+                                    ))}
+                                  </select>
+                                  <button
+                                    onClick={() => addBrandMutation.mutate()}
+                                    disabled={!selectedBrandId || addBrandMutation.isPending}
+                                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none disabled:opacity-50"
+                                  >
+                                    <Plus className="h-4 w-4 mr-1" /> Thêm
+                                  </button>
+                                  <button
+                                    onClick={() => addAllBrandsMutation.mutate()}
+                                    disabled={addAllBrandsMutation.isPending || brands.length === programBrands.length}
+                                    className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none disabled:opacity-50"
+                                  >
+                                    Chọn tất cả
+                                  </button>
+                                </div>
+                              )}
 
                               {programBrands.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                   {programBrands.map((pb: any) => (
                                     <span key={pb.brand_id} className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                                       {pb.brands?.brand_name}
-                                      <button
-                                        type="button"
-                                        onClick={() => removeBrandMutation.mutate(pb.brand_id)}
-                                        className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white"
-                                      >
-                                        <span className="sr-only">Xóa nhãn hàng</span>
-                                        <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8">
-                                          <path strokeLinecap="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" />
-                                        </svg>
-                                      </button>
+                                      {isAdmin && (
+                                        <button
+                                          type="button"
+                                          onClick={() => removeBrandMutation.mutate(pb.brand_id)}
+                                          className="flex-shrink-0 ml-1.5 h-4 w-4 rounded-full inline-flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:bg-indigo-500 focus:text-white"
+                                        >
+                                          <span className="sr-only">Xóa nhãn hàng</span>
+                                          <svg className="h-2 w-2" stroke="currentColor" fill="none" viewBox="0 0 8 8">
+                                            <path strokeLinecap="round" strokeWidth="1.5" d="M1 1l6 6m0-6L1 7" />
+                                          </svg>
+                                        </button>
+                                      )}
                                     </span>
                                   ))}
                                 </div>
@@ -353,7 +499,7 @@ export default function Programs() {
                   ))}
                   {filteredPrograms.length === 0 && (
                     <tr>
-                      <td colSpan={5} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                      <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                         Không tìm thấy chương trình nào.
                       </td>
                     </tr>
@@ -463,6 +609,68 @@ export default function Programs() {
         title="Xóa Program"
         message="Bạn có chắc chắn muốn xóa program này không? Hành động này không thể hoàn tác."
       />
+
+      <Modal isOpen={!!assignSupProgramId} onClose={() => setAssignSupProgramId(null)} title="Phân công SUP cho Chương trình">
+        <div className="space-y-4">
+          <div className="flex items-center space-x-2 mb-4">
+            <select
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2"
+              value={selectedSupId}
+              onChange={(e) => setSelectedSupId(e.target.value)}
+            >
+              <option value="">-- Chọn SUP --</option>
+              {supUsers.filter((sup: any) => !programSups.some((ps: any) => ps.sup_id === sup.id)).map((sup: any) => (
+                <option key={sup.id} value={sup.id}>{sup.full_name} {sup.phone_number ? `(${sup.phone_number})` : ''}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => addSupMutation.mutate()}
+              disabled={!selectedSupId || addSupMutation.isPending}
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none disabled:opacity-50"
+            >
+              <Plus className="h-4 w-4 mr-1" /> Thêm
+            </button>
+          </div>
+
+          <div className="mt-4">
+            <h4 className="text-sm font-medium text-gray-900 mb-2">Danh sách SUP phụ trách:</h4>
+            {programSups.length > 0 ? (
+              <ul className="divide-y divide-gray-200 border border-gray-200 rounded-md">
+                {programSups.map((ps: any) => {
+                  const supUser = supUsers.find((u: any) => u.id === ps.sup_id);
+                  return (
+                    <li key={ps.sup_id} className="flex items-center justify-between py-3 pl-3 pr-4 text-sm">
+                      <div className="flex w-0 flex-1 items-center">
+                        <span className="truncate font-medium">{supUser?.full_name || 'Unknown SUP'}</span>
+                        {supUser?.phone_number && <span className="ml-2 text-gray-500">({supUser.phone_number})</span>}
+                      </div>
+                      <div className="ml-4 flex-shrink-0">
+                        <button
+                          onClick={() => removeSupMutation.mutate(ps.sup_id)}
+                          className="font-medium text-red-600 hover:text-red-500"
+                        >
+                          Xóa
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-sm text-gray-500 italic">Chưa có SUP nào được phân công.</p>
+            )}
+          </div>
+          
+          <div className="mt-6 flex justify-end">
+            <button
+              onClick={() => setAssignSupProgramId(null)}
+              className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Đóng
+            </button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

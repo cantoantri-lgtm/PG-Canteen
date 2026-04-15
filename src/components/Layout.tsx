@@ -17,6 +17,7 @@ export default function Layout() {
   }
 
   const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
 
   const adminNavigation = [
     { name: 'Bảng điều khiển', href: '/dashboard', icon: LayoutDashboard, category: 'Main' },
@@ -34,6 +35,18 @@ export default function Layout() {
     { name: 'Chỉ tiêu doanh số', href: '/dashboard/admin/kpis', icon: Target, category: 'Hoạt động' },
     { name: 'Nhập đơn hàng bán', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
     { name: 'Báo cáo PG', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Báo cáo Chương trình', href: '/dashboard/admin/program-report', icon: FileText, category: 'Báo cáo' },
+  ];
+
+  const supNavigation = [
+    { name: 'Bảng điều khiển', href: '/dashboard', icon: LayoutDashboard, category: 'Main' },
+    { name: 'Quản lý PG', href: '/dashboard/admin/profiles', icon: Users, category: 'Người dùng' },
+    { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
+    { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Hoạt động' },
+    { name: 'Phân công lịch làm việc', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Hoạt động' },
+    { name: 'Đơn hàng', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
+    { name: 'Báo cáo PG', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Báo cáo Chương trình', href: '/dashboard/admin/program-report', icon: FileText, category: 'Báo cáo' },
   ];
 
   const pgNavigation = [
@@ -42,7 +55,7 @@ export default function Layout() {
     { name: 'Hồ sơ cá nhân', href: '/dashboard/profile', icon: UserCircle, category: 'Cá nhân' },
   ];
 
-  const navigation = isAdmin ? adminNavigation : pgNavigation;
+  const navigation = isAdmin ? adminNavigation : (isSup ? supNavigation : pgNavigation);
 
   // Group navigation by category
   const groupedNav = navigation.reduce((acc, item) => {

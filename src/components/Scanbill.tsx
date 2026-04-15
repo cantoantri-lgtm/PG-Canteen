@@ -4,7 +4,6 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { toast } from 'sonner';
 import { matchProduct } from '../services/ocrLearningService';
 import imageCompression from 'browser-image-compression';
-import Tesseract from 'tesseract.js';
 
 interface Product {
   product_id: string;
@@ -70,76 +69,16 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         compressedFile = file;
       }
       
-      setScanProgress(15);
-      setScanStatus('Đang đọc văn bản (OCR)...');
-
-      // 2. Áp dụng On-device OCR (Có xử lý lỗi để không làm sập toàn bộ quy trình)
-      let ocrText = '';
-      try {
-        const worker = await Tesseract.createWorker('vie');
-        const ret = await worker.recognize(compressedFile);
-        ocrText = ret.data.text;
-        await worker.terminate();
-      } catch (ocrError) {
-        console.warn('Lỗi On-device OCR (Tesseract), bỏ qua bước này:', ocrError);
-        // Không throw error, tiếp tục dùng Gemini
-      }
-
       setScanProgress(30);
       setScanStatus('Đang phân tích dữ liệu...');
 
       const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
       const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang';
 
-      // Thử phân tích nhanh bằng Regex (On-device parsing) nếu có ocrText
-      const localFoundItems: any[] = [];
       let items = [];
 
-      if (ocrText) {
-        const lines = ocrText.split('\n').map(l => l.trim()).filter(Boolean);
-        
-        // Tìm kiếm các sản phẩm trong danh sách bằng cách so khớp chuỗi đơn giản
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i].toLowerCase();
-          for (const p of products) {
-            const pName = p.product_name.toLowerCase();
-            if (line.includes(pName) && pName.length > 5) {
-              // Tìm giá ở dòng hiện tại hoặc dòng tiếp theo
-              let price = p.value;
-              let qty = 1;
-              const nextLine = lines[i+1] || '';
-              const numbers = (line + ' ' + nextLine).match(/\d+([.,]\d+)?/g);
-              if (numbers) {
-                // Tìm số gần với giá sản phẩm nhất
-                const prices = numbers.map(n => parseFloat(n.replace(/,/g, ''))).filter(n => n > 1000);
-                if (prices.length > 0) {
-                  const closest = prices.reduce((prev, curr) => Math.abs(curr - p.value) < Math.abs(prev - p.value) ? curr : prev);
-                  if (Math.abs(closest - p.value) < p.value * 0.5) {
-                    price = closest;
-                  }
-                }
-              }
-              localFoundItems.push({
-                raw_name: lines[i],
-                qty: qty,
-                unit_price: price,
-                category: p.category_name || 'Khác'
-              });
-              break; // Đã tìm thấy sản phẩm trên dòng này
-            }
-          }
-        }
-
-        // Nếu tìm thấy sản phẩm rõ ràng, sử dụng luôn kết quả local để tiết kiệm API
-        if (localFoundItems.length > 0 && localFoundItems.length >= lines.length * 0.1) {
-          items = localFoundItems;
-          setScanProgress(100);
-          setScanStatus('Hoàn tất (On-device)!');
-        }
-      }
-
       if (items.length === 0) {
-        // Nếu không tìm thấy hoặc bill phức tạp, gọi Gemini API
+        // Gọi Gemini API
         progressInterval = setInterval(() => {
           setScanProgress(prev => {
             if (prev < 70) {
@@ -179,16 +118,11 @@ Cấu trúc hóa đơn thường hiển thị theo cặp dòng:
 - Dòng trên: [Tên Sản Phẩm]
 - Dòng dưới: [Số lượng]      [Đơn giá]      [Thành tiền]
 
-Dưới đây là văn bản thô đã được quét từ hóa đơn (OCR Text) để hỗ trợ bạn:
-"""
-${ocrText}
-"""
-
 ĐỊNH DẠNG ĐẦU RA:
 Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), 'unit_price' (đơn giá), và 'category' (ngành hàng).`;
 
         const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
+          model: 'gemini-2.5-flash',
           contents: {
             parts: [
               {

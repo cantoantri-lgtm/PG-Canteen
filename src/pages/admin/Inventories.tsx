@@ -6,6 +6,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 interface Inventory {
   id: string;
@@ -18,6 +19,10 @@ interface Inventory {
 }
 
 export default function Inventories() {
+  const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Inventory>>({});
   const [isAdding, setIsAdding] = useState(false);
@@ -85,10 +90,9 @@ export default function Inventories() {
   });
 
   const { data: inventories = [], isLoading } = useQuery({
-    queryKey: ['inventories'],
+    queryKey: ['inventories', user?.id],
     queryFn: async () => {
-      // ĐÃ SỬA: 'inventory' -> 'inventories'
-      const { data, error } = await supabase
+      let query = supabase
         .from('inventories')
         .select(`
           *,
@@ -96,6 +100,12 @@ export default function Inventories() {
           products:product_id (product_name)
         `)
         .order('last_updated', { ascending: false });
+        
+      if (isSup && user?.id) {
+        query = query.eq('sup_id', user.id);
+      }
+      
+      const { data, error } = await query;
       if (error) throw error;
       return data as Inventory[];
     }
@@ -152,7 +162,10 @@ export default function Inventories() {
 
   const handleAdd = () => {
     setIsAdding(true);
-    setEditForm({ quantity: 0 });
+    setEditForm({ 
+      quantity: 0,
+      sup_id: isSup ? user?.id : undefined
+    });
     setSelectedModalBrand('');
     setIsModalOpen(true);
   };
@@ -171,14 +184,14 @@ export default function Inventories() {
       toast.error("Vui lòng chọn sản phẩm.");
       return;
     }
-    if (!editForm.sup_id) {
+    if (!editForm.sup_id && !isSup) {
       toast.error("Vui lòng chọn Supervisor.");
       return;
     }
 
     try {
       const payload = {
-        sup_id: editForm.sup_id,
+        sup_id: isSup ? user?.id : editForm.sup_id,
         product_id: editForm.product_id,
         quantity: editForm.quantity || 0,
       };
@@ -218,17 +231,19 @@ export default function Inventories() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <div className="w-full sm:w-48">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo SUP</label>
-          <select
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
-            value={selectedSupFilter}
-            onChange={(e) => setSelectedSupFilter(e.target.value)}
-          >
-            <option value="">Tất cả SUP</option>
-            {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-          </select>
-        </div>
+        {isAdmin && (
+          <div className="w-full sm:w-48">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo SUP</label>
+            <select
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+              value={selectedSupFilter}
+              onChange={(e) => setSelectedSupFilter(e.target.value)}
+            >
+              <option value="">Tất cả SUP</option>
+              {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="w-full sm:w-64">
           <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Sản phẩm</label>
           <select
@@ -289,17 +304,19 @@ export default function Inventories() {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={isAdding ? 'Thêm Tồn kho' : 'Sửa Tồn kho'}>
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Supervisor *</label>
-            <select
-              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
-              value={editForm.sup_id || ''}
-              onChange={e => setEditForm({ ...editForm, sup_id: e.target.value })}
-            >
-              <option value="">Chọn Supervisor</option>
-              {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
-            </select>
-          </div>
+          {isAdmin && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Supervisor *</label>
+              <select
+                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+                value={editForm.sup_id || ''}
+                onChange={e => setEditForm({ ...editForm, sup_id: e.target.value })}
+              >
+                <option value="">Chọn Supervisor</option>
+                {profiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
+              </select>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Thương hiệu (Lọc sản phẩm)</label>

@@ -22,6 +22,7 @@ import Profiles from './pages/admin/Profiles';
 import Profile from './pages/Profile';
 import Orders from './pages/admin/Orders';
 import PGReport from './pages/PGReport';
+import ProgramReport from './pages/admin/ProgramReport';
 import Roles from './pages/admin/Roles';
 import Channels from './pages/admin/Channels';
 import Accounts from './pages/admin/Accounts';
@@ -30,14 +31,16 @@ import Promotions from './pages/admin/Promotions';
 import Inventories from './pages/admin/Inventories';
 import { Toaster } from 'sonner';
 
-const ProtectedRoute = ({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) => {
+const ProtectedRoute = ({ children, requireAdmin = false, allowSup = false }: { children: React.ReactNode, requireAdmin?: boolean, allowSup?: boolean }) => {
   const { user, loading } = useAuth();
   
   if (loading) return <div>Đang tải...</div>;
   if (!user) return <Navigate to="/" />;
   
   const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  if (requireAdmin && !isAdmin) return <Navigate to="/dashboard" />;
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+  
+  if (requireAdmin && !isAdmin && !(allowSup && isSup)) return <Navigate to="/dashboard" />;
 
   return <>{children}</>;
 };
@@ -48,7 +51,8 @@ const DashboardRouter = () => {
   if (loading) return <div>Đang tải...</div>;
   
   const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  return isAdmin ? <AdminDashboard /> : <PGDashboard />;
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+  return (isAdmin || isSup) ? <AdminDashboard /> : <PGDashboard />;
 };
 
 export default function App() {
@@ -70,21 +74,22 @@ export default function App() {
             <Route index element={<DashboardRouter />} />
             <Route path="profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
             <Route path="report" element={<ProtectedRoute><PGReport /></ProtectedRoute>} />
+            <Route path="admin/program-report" element={<ProtectedRoute requireAdmin allowSup><ProgramReport /></ProtectedRoute>} />
             <Route path="admin/shops" element={<ProtectedRoute requireAdmin><Shops /></ProtectedRoute>} />
             <Route path="admin/shop-map" element={<ProtectedRoute requireAdmin><ShopMap /></ProtectedRoute>} />
             <Route path="admin/brands" element={<ProtectedRoute requireAdmin><Brands /></ProtectedRoute>} />
             <Route path="admin/product-groups" element={<ProtectedRoute requireAdmin><ProductGroups /></ProtectedRoute>} />
             <Route path="admin/products" element={<ProtectedRoute requireAdmin><Products /></ProtectedRoute>} />
-            <Route path="admin/schedules" element={<ProtectedRoute requireAdmin><Schedules /></ProtectedRoute>} />
+            <Route path="admin/schedules" element={<ProtectedRoute requireAdmin allowSup><Schedules /></ProtectedRoute>} />
             <Route path="admin/kpis" element={<ProtectedRoute requireAdmin><KPIs /></ProtectedRoute>} />
-            <Route path="admin/profiles" element={<ProtectedRoute requireAdmin><Profiles /></ProtectedRoute>} />
-            <Route path="admin/orders" element={<ProtectedRoute requireAdmin><Orders /></ProtectedRoute>} />
+            <Route path="admin/profiles" element={<ProtectedRoute requireAdmin allowSup><Profiles /></ProtectedRoute>} />
+            <Route path="admin/orders" element={<ProtectedRoute requireAdmin allowSup><Orders /></ProtectedRoute>} />
             <Route path="admin/roles" element={<ProtectedRoute requireAdmin><Roles /></ProtectedRoute>} />
             <Route path="admin/channels" element={<ProtectedRoute requireAdmin><Channels /></ProtectedRoute>} />
             <Route path="admin/accounts" element={<ProtectedRoute requireAdmin><Accounts /></ProtectedRoute>} />
-            <Route path="admin/programs" element={<ProtectedRoute requireAdmin><Programs /></ProtectedRoute>} />
+            <Route path="admin/programs" element={<ProtectedRoute requireAdmin allowSup><Programs /></ProtectedRoute>} />
             <Route path="admin/promotions" element={<ProtectedRoute requireAdmin><Promotions /></ProtectedRoute>} />
-            <Route path="admin/inventories" element={<ProtectedRoute requireAdmin><Inventories /></ProtectedRoute>} />
+            <Route path="admin/inventories" element={<ProtectedRoute requireAdmin allowSup><Inventories /></ProtectedRoute>} />
           </Route>
           
           <Route path="*" element={<Navigate to="/" replace />} />

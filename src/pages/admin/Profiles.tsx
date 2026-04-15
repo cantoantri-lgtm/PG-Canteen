@@ -6,6 +6,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 interface Profile {
   id: string;
@@ -14,23 +15,34 @@ interface Profile {
   phone_number: string;
   admin_role: boolean;
   role?: string;
+  role_id?: string;
   email: string;
   login_pin: string;
   manager_id?: string;
+  status?: boolean;
+  created_by?: string;
+  created_date?: string;
 }
 
 export default function Profiles() {
+  const { user } = useAuth();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Profile>>({});
   const [isAdding, setIsAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
 
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
-    queryKey: ['profiles'],
+    queryKey: ['profiles', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('profiles').select('*').order('full_name');
+      let query = supabase.from('profiles').select('*').order('full_name');
+      const isSup = user?.role_name?.toUpperCase() === 'SUP';
+      if (isSup && user?.id) {
+        query = query.eq('manager_id', user.id);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return data as Profile[];
     }
@@ -57,13 +69,16 @@ export default function Profiles() {
       const matchesSearch = p.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                            p.phone_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            (p.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesRole = selectedRoleFilter === '' || p.role === selectedRoleFilter;
-      return matchesSearch && matchesRole;
+      const matchesRole = selectedRoleFilter === '' || p.role_id === selectedRoleFilter || p.role === selectedRoleFilter;
+      const matchesStatus = selectedStatusFilter === 'all' || 
+                            (selectedStatusFilter === 'on' && p.status !== false) || 
+                            (selectedStatusFilter === 'off' && p.status === false);
+      return matchesSearch && matchesRole && matchesStatus;
     }).map(p => ({
       ...p,
       manager_name: profiles.find(m => m.id === p.manager_id)?.full_name
     }));
-  }, [profiles, searchQuery, selectedRoleFilter]);
+  }, [profiles, searchQuery, selectedRoleFilter, selectedStatusFilter]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload: Partial<Profile>) => {
@@ -82,14 +97,22 @@ export default function Profiles() {
         // Update login_pin and role directly in profiles
         const updateData: any = {};
         if (payload.login_pin) updateData.login_pin = payload.login_pin;
-        if (payload.role) updateData.role = payload.role;
+        if (payload.role) updateData.role_id = payload.role;
+        updateData.created_by = user?.id;
+        updateData.created_date = new Date().toISOString();
+        updateData.status = payload.status !== undefined ? payload.status : true;
+        if (payload.manager_id) updateData.manager_id = payload.manager_id;
         
         if (Object.keys(updateData).length > 0) {
           await supabase.from('profiles').update(updateData).eq('phone_number', payload.phone_number);
         }
         return payload;
       } else {
-        const { id, ...updateData } = payload;
+        const { id, manager_name, ...updateData } = payload as any;
+        if (updateData.role) {
+          updateData.role_id = updateData.role;
+          delete updateData.role;
+        }
         const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
         if (error) throw error;
         return payload;
@@ -115,7 +138,14 @@ export default function Profiles() {
 
   const handleAdd = () => {
     setIsAdding(true);
-    setEditForm({ admin_role: false });
+    const isSup = user?.role_name?.toUpperCase() === 'SUP';
+    const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
+    setEditForm({ 
+      admin_role: false, 
+      status: true,
+      role: isSup && pgRole ? pgRole.role_id : undefined,
+      manager_id: isSup ? user?.id : undefined
+    });
     setIsModalOpen(true);
   };
 
@@ -163,6 +193,18 @@ export default function Profiles() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
+        <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Tình trạng</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedStatusFilter}
+            onChange={(e) => setSelectedStatusFilter(e.target.value)}
+          >
+            <option value="all">Tất cả</option>
+            <option value="on">Đang hoạt động</option>
+            <option value="off">Ngưng hoạt động</option>
+          </select>
+        </div>
         <div className="w-full sm:w-64">
           <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Vai trò</label>
           <select
@@ -189,6 +231,7 @@ export default function Profiles() {
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Email</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Ngày sinh</th>
                     <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Vai trò</th>
+                    <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Trạng thái</th>
                     <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Thao tác</span></th>
                   </tr>
                 </thead>
@@ -201,14 +244,21 @@ export default function Profiles() {
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.email || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.dob || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
-                        {profile.role ? (
+                        {profile.role_id || profile.role ? (
                           <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                            {roles.find(r => r.role_id === profile.role)?.role_name || profile.role}
+                            {roles.find(r => r.role_id === (profile.role_id || profile.role))?.role_name || profile.role}
                           </span>
                         ) : profile.admin_role ? (
                           <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10">Admin</span>
                         ) : (
                           <span className="inline-flex items-center rounded-md bg-gray-50 px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-inset ring-gray-600/20">Chưa có</span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
+                        {profile.status !== false ? (
+                          <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-600/20">Hoạt động</span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-md bg-red-50 px-2 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20">Ngưng</span>
                         )}
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
@@ -286,9 +336,28 @@ export default function Profiles() {
               }
             </select>
           </div>
-          <div className="flex items-center mt-4">
-            <input id="admin_role" type="checkbox" className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={editForm.admin_role || false} onChange={e => setEditForm({...editForm, admin_role: e.target.checked})} />
-            <label htmlFor="admin_role" className="ml-2 block text-sm text-gray-900">Quyền Quản trị viên</label>
+          <div className="flex items-center mt-4 justify-between">
+            <div className="flex items-center">
+              <input id="admin_role" type="checkbox" className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={editForm.admin_role || false} onChange={e => setEditForm({...editForm, admin_role: e.target.checked})} />
+              <label htmlFor="admin_role" className="ml-2 block text-sm text-gray-900">Quyền Quản trị viên</label>
+            </div>
+            <div className="flex items-center">
+              <label className="mr-3 text-sm font-medium text-gray-700">Trạng thái hoạt động</label>
+              <button
+                type="button"
+                onClick={() => setEditForm({...editForm, status: editForm.status === false ? true : false})}
+                className={`${
+                  editForm.status !== false ? 'bg-indigo-600' : 'bg-gray-200'
+                } relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2`}
+              >
+                <span
+                  aria-hidden="true"
+                  className={`${
+                    editForm.status !== false ? 'translate-x-5' : 'translate-x-0'
+                  } pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out`}
+                />
+              </button>
+            </div>
           </div>
           <div className="flex justify-end space-x-3 mt-6">
             <button onClick={() => setIsModalOpen(false)} disabled={saveMutation.isPending} className="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">Hủy</button>

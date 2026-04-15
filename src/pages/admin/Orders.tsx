@@ -6,6 +6,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 // --- CÁC INTERFACE DỮ LIỆU (Cập nhật theo cấu trúc mới) ---
 interface Order {
@@ -32,6 +33,10 @@ interface Brand { brand_id: string; brand_name: string; }
 interface Product { product_id: string; product_name: string; brand_id: string; value: number; }
 
 export default function Orders() {
+  const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   // --- STATES ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Order>>({});
@@ -70,7 +75,7 @@ export default function Orders() {
 
   // --- 1. LẤY DỮ LIỆU TỪ SUPABASE ---
   const { data: orders = [], isLoading: loadingOrders, error: ordersError } = useQuery({
-    queryKey: ['admin_orders_list'],
+    queryKey: ['admin_orders_list', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('order_details')
@@ -78,7 +83,7 @@ export default function Orders() {
           id, order_id, product_id, qty, net_value, switched_from_brand,
           orders!inner(
             cart_id, created_at, pg_id, program_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
-            profiles(full_name)
+            profiles(full_name, manager_id)
           ),
           products(
             product_name,
@@ -93,7 +98,7 @@ export default function Orders() {
       }
       
       // Flatten the data
-      return (data || []).map(item => {
+      let flattenedData = (data || []).map(item => {
         const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
         const product = Array.isArray(item.products) ? item.products[0] : item.products;
         const productGroup = Array.isArray(product?.product_group) ? product.product_group[0] : product?.product_group;
@@ -120,6 +125,12 @@ export default function Orders() {
           }
         };
       }) as any as Order[];
+
+      if (isSup && user?.id) {
+        flattenedData = flattenedData.filter(o => (o.profiles as any)?.manager_id === user.id);
+      }
+
+      return flattenedData;
     }
   });
 
@@ -469,10 +480,12 @@ export default function Orders() {
             <Download className="-ml-1 mr-2 h-5 w-5 text-gray-400" />
             Xuất CSV
           </button>
-          <button onClick={handleAdd} className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
-            <Plus className="-ml-1 mr-2 h-5 w-5" />
-            Nhập Đơn hàng
-          </button>
+          {isAdmin && (
+            <button onClick={handleAdd} className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
+              <Plus className="-ml-1 mr-2 h-5 w-5" />
+              Nhập Đơn hàng
+            </button>
+          )}
         </div>
       </div>
 
@@ -624,8 +637,12 @@ export default function Orders() {
                       </td>
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                         <button onClick={() => handleViewBill(order.cart_id, order.bill_image_url)} className="text-blue-600 hover:text-blue-900 mr-4" title="Xem hóa đơn"><Eye className="h-4 w-4" /></button>
-                        <button onClick={() => handleEdit(order)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
-                        <button onClick={() => setDeleteId(order.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
+                        {isAdmin && (
+                          <>
+                            <button onClick={() => handleEdit(order)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
+                            <button onClick={() => setDeleteId(order.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

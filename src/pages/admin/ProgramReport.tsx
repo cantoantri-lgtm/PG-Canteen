@@ -1,86 +1,46 @@
 import React, { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../lib/AuthContext';
-import { format, startOfMonth, endOfMonth, parseISO } from 'date-fns';
+import { supabase } from '../../lib/supabase';
+import { useAuth } from '../../lib/AuthContext';
+import { format, startOfMonth, endOfMonth } from 'date-fns';
 
-interface OrderItem {
-  id: string;
-  cart_id: string;
-  product_id: string;
-  qty: number;
-  net_value: number;
-  switched_from_brand: string | null;
-  created_at: string;
-  products: any;
-}
-
-interface KPI {
-  kpi_id: string;
-  start_date: string;
-  end_date: string;
-  sale_target: number;
-}
-
-export default function PGReport() {
+export default function ProgramReport() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [selectedPgId, setSelectedPgId] = useState<string>(isAdmin || isSup ? '' : (user?.id || ''));
-  const [selectedManagerId, setSelectedManagerId] = useState<string>(isSup ? (user?.id || '') : '');
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
 
-  // Fetch all profiles for admin/manager filtering
-  const { data: allProfiles = [] } = useQuery({
-    queryKey: ['all_profiles'],
+  const { data: supPrograms = [] } = useQuery({
+    queryKey: ['sup_programs', user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name, manager_id, admin_role, role').order('full_name');
-      return data || [];
-    }
+      if (!user?.id) return [];
+      const { data, error } = await supabase.from('sup_programs').select('program_id').eq('sup_id', user.id);
+      if (error) throw error;
+      return data.map(sp => sp.program_id);
+    },
+    enabled: isSup && !!user?.id
   });
 
-  const { data: roles = [] } = useQuery({
-    queryKey: ['roles'],
+  const { data: programs = [] } = useQuery({
+    queryKey: ['programs', supPrograms],
     queryFn: async () => {
-      const { data } = await supabase.from('roles').select('*');
-      return data || [];
-    }
-  });
-
-  const managers = useMemo(() => {
-    return allProfiles.filter(p => {
-      const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
-      return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
-    });
-  }, [allProfiles, roles]);
-
-  const filteredProfiles = useMemo(() => {
-    if (isAdmin) {
-      if (selectedManagerId) {
-        return allProfiles.filter(p => p.manager_id === selectedManagerId && !p.admin_role);
+      let query = supabase.from('programs').select('program_id, program_name').order('start_date', { ascending: false });
+      if (isSup && supPrograms.length > 0) {
+        query = query.in('program_id', supPrograms);
+      } else if (isSup && supPrograms.length === 0) {
+        return [];
       }
-      return allProfiles.filter(p => !p.admin_role);
+      const { data } = await query;
+      return (data || []) as any[];
     }
-    if (isSup) {
-      return allProfiles.filter(p => p.manager_id === user?.id && !p.admin_role);
-    }
-    // Nếu là quản lý (nhưng không phải admin/sup)
-    const managed = allProfiles.filter(p => p.manager_id === user?.id);
-    if (managed.length > 0) {
-      return managed;
-    }
-    return [];
-  }, [allProfiles, isAdmin, isSup, selectedManagerId, user?.id]);
+  });
 
-  const isManager = !isAdmin && !isSup && allProfiles.some(p => p.manager_id === user?.id);
-  const canSelectPg = isAdmin || isSup || isManager;
-
-  // Fetch orders for the selected PG and month
   const { data: orders = [], isLoading: loadingOrders } = useQuery({
-    queryKey: ['pg_orders', selectedPgId, selectedDate],
+    queryKey: ['program_orders', selectedProgramId, selectedDate],
     queryFn: async () => {
-      if (!selectedPgId) return [];
+      if (!selectedProgramId) return [];
       
       const date = new Date(selectedDate);
       const start = startOfMonth(date).toISOString();
@@ -91,7 +51,8 @@ export default function PGReport() {
         .select(`
           id, order_id, product_id, qty, net_value, switched_from_brand,
           orders!inner(
-            cart_id, created_at, pg_id
+            cart_id, created_at, pg_id, program_id,
+            profiles!inner(manager_id)
           ),
           products (
             product_name,
@@ -100,14 +61,22 @@ export default function PGReport() {
             )
           )
         `)
-        .eq('orders.pg_id', selectedPgId)
+        .eq('orders.program_id', selectedProgramId)
         .gte('orders.created_at', start)
         .lte('orders.created_at', end);
         
       if (error) throw error;
       
-      // Flatten the data
-      return (data || []).map(item => {
+      let filteredData = data || [];
+      if (isSup && user?.id) {
+        filteredData = filteredData.filter((item: any) => {
+          const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          const profile = Array.isArray(order?.profiles) ? order.profiles[0] : order?.profiles;
+          return profile?.manager_id === user.id;
+        });
+      }
+      
+      return filteredData.map((item: any) => {
         const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
         const product = Array.isArray(item.products) ? item.products[0] : item.products;
         const productGroup = Array.isArray(product?.product_group) ? product.product_group[0] : product?.product_group;
@@ -121,6 +90,7 @@ export default function PGReport() {
           net_value: item.net_value,
           switched_from_brand: item.switched_from_brand,
           created_at: order?.created_at,
+          pg_id: order?.pg_id,
           products: {
             product_name: product?.product_name,
             brands: {
@@ -128,70 +98,28 @@ export default function PGReport() {
             }
           }
         };
-      }) as any as OrderItem[];
+      });
     },
-    enabled: !!selectedPgId,
-  });
-
-  // Fetch KPIs for the selected PG
-  const { data: kpis = [] } = useQuery({
-    queryKey: ['pg_kpis', selectedPgId, selectedDate],
-    queryFn: async () => {
-      if (!selectedPgId) return [];
-      const date = new Date(selectedDate);
-      const start = startOfMonth(date).toISOString().split('T')[0];
-      const end = endOfMonth(date).toISOString().split('T')[0];
-      
-      const { data, error } = await supabase
-        .from('kpis')
-        .select('*')
-        .eq('pg_id', selectedPgId)
-        .gte('end_date', start)
-        .lte('start_date', end);
-        
-      if (error) throw error;
-      return data as KPI[];
-    },
-    enabled: !!selectedPgId,
+    enabled: !!selectedProgramId,
   });
 
   const reportData = useMemo(() => {
-    if (!selectedPgId) return null;
+    if (!selectedProgramId) return null;
 
-    const pgName = (isAdmin || isManager)
-      ? allProfiles.find(p => p.id === selectedPgId)?.full_name || 'Không xác định'
-      : user?.full_name || 'Không xác định';
+    const programName = programs.find(p => p.program_id === selectedProgramId)?.program_name || 'Không xác định';
 
-    // Lọc đơn hàng của đúng ngày được chọn
     const dailyOrders = orders.filter(o => o.created_at.startsWith(selectedDate));
-    
-    // Tính số giỏ hàng
     const uniqueCarts = new Set(dailyOrders.map(o => o.cart_id)).size;
-    
-    // Tổng số tiền ngày
     const dailyTotalAmount = dailyOrders.reduce((sum, o) => sum + Number(o.net_value), 0);
     
-    // Lũy kế tháng (Loại bỏ hàng đối thủ theo chuẩn tính KPI)
     const monthlyTotalAmount = orders
       .filter(o => !o.switched_from_brand)
       .reduce((sum, o) => sum + Number(o.net_value), 0);
 
-    // Tính tỷ lệ chuyển đổi
     const dailyTotalQty = dailyOrders.reduce((sum, o) => sum + Number(o.qty), 0);
     const dailyConvertedQty = dailyOrders.filter(o => o.switched_from_brand).reduce((sum, o) => sum + Number(o.qty), 0);
     const conversionRate = dailyTotalQty > 0 ? (dailyConvertedQty / dailyTotalQty) * 100 : 0;
 
-    // Tính toán KPI
-    const totalMonthlyTarget = kpis.reduce((sum, kpi) => sum + Number(kpi.sale_target), 0);
-    
-    const dateObj = new Date(selectedDate);
-    const daysInMonth = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
-    const dailyTarget = totalMonthlyTarget / daysInMonth;
-
-    const dailyKpiProgress = dailyTarget > 0 ? (dailyTotalAmount / dailyTarget) * 100 : 0;
-    const monthlyKpiProgress = totalMonthlyTarget > 0 ? (monthlyTotalAmount / totalMonthlyTarget) * 100 : 0;
-
-    // Gom nhóm dữ liệu cho bảng: Thương hiệu -> Sản phẩm -> Tính tổng SL & Tiền
     const tableDataMap = new Map<string, { brand: string, product: string, qty: number, amount: number }>();
     
     dailyOrders.forEach(o => {
@@ -211,61 +139,39 @@ export default function PGReport() {
     const tableData = Array.from(tableDataMap.values()).sort((a, b) => a.brand.localeCompare(b.brand) || a.product.localeCompare(b.product));
 
     return {
-      pgName,
+      programName,
       date: selectedDate,
       uniqueCarts,
       dailyTotalAmount,
-      dailyKpiProgress,
-      monthlyKpiProgress,
+      monthlyTotalAmount,
       conversionRate,
       tableData
     };
-  }, [selectedPgId, selectedDate, orders, kpis, allProfiles, isAdmin, isManager, user]);
+  }, [selectedProgramId, selectedDate, orders, programs]);
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4">
       <div className="sm:flex sm:items-center sm:justify-between pt-6">
-        <h2 className="text-2xl font-bold text-gray-900">Báo Cáo Cuối Ngày PG</h2>
+        <h2 className="text-2xl font-bold text-gray-900">Báo Cáo Chương Trình</h2>
       </div>
 
       <div className="bg-white shadow rounded-lg p-6 border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          {isAdmin && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo Quản lý</label>
-              <select 
-                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                value={selectedManagerId}
-                onChange={(e) => {
-                  setSelectedManagerId(e.target.value);
-                  setSelectedPgId('');
-                }}
-              >
-                <option value="">-- Tất cả Quản lý --</option>
-                {managers.map(m => (
-                  <option key={m.id} value={m.id}>{m.full_name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {canSelectPg && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Chọn Nhân viên PG</label>
-              <select 
-                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                value={selectedPgId}
-                onChange={(e) => setSelectedPgId(e.target.value)}
-              >
-                <option value="">-- Chọn PG --</option>
-                {filteredProfiles.map(p => (
-                  <option key={p.id} value={p.id}>{p.full_name}</option>
-                ))}
-              </select>
-            </div>
-          )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Chọn Chương trình</label>
+            <select 
+              className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+              value={selectedProgramId}
+              onChange={(e) => setSelectedProgramId(e.target.value)}
+            >
+              <option value="">-- Chọn Chương trình --</option>
+              {programs.map(p => (
+                <option key={p.program_id} value={p.program_id}>{p.program_name}</option>
+              ))}
+            </select>
+          </div>
           
-          <div className={!canSelectPg ? "md:col-span-2" : ""}>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ngày báo cáo</label>
             <input 
               type="date" 
@@ -278,42 +184,32 @@ export default function PGReport() {
 
         {loadingOrders ? (
           <div className="text-center py-10 text-gray-500">Đang tải dữ liệu báo cáo...</div>
-        ) : !selectedPgId ? (
-          <div className="text-center py-10 text-gray-500">Vui lòng chọn nhân viên PG để xem báo cáo.</div>
+        ) : !selectedProgramId ? (
+          <div className="text-center py-10 text-gray-500">Vui lòng chọn chương trình để xem báo cáo.</div>
         ) : reportData ? (
           <div className="space-y-8">
             
-            {/* --- CÁC THẺ THỐNG KÊ (ĐÃ BỎ THẺ NGÀY THÁNG) --- */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                <p className="text-sm font-medium text-indigo-600 mb-1">Tên PG</p>
-                <p className="text-lg font-bold text-gray-900">{reportData.pgName}</p>
+                <p className="text-sm font-medium text-indigo-600 mb-1">Chương trình</p>
+                <p className="text-lg font-bold text-gray-900 line-clamp-1">{reportData.programName}</p>
               </div>
               <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                <p className="text-sm font-medium text-indigo-600 mb-1">Số giỏ hàng</p>
+                <p className="text-sm font-medium text-indigo-600 mb-1">Số giỏ hàng trong ngày</p>
                 <p className="text-lg font-bold text-gray-900">{reportData.uniqueCarts}</p>
               </div>
               <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                <p className="text-sm font-medium text-indigo-600 mb-1">Tổng số tiền</p>
+                <p className="text-sm font-medium text-indigo-600 mb-1">Doanh số trong ngày</p>
                 <p className="text-lg font-bold text-gray-900">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(reportData.dailyTotalAmount)}</p>
               </div>
               <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                <p className="text-sm font-medium text-indigo-600 mb-1">Tiến độ đạt KPI ngày</p>
-                <p className="text-lg font-bold text-gray-900">{reportData.dailyKpiProgress.toFixed(1)}%</p>
-              </div>
-              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                <p className="text-sm font-medium text-indigo-600 mb-1">Tiến độ KPI tháng</p>
-                <p className="text-lg font-bold text-gray-900">{reportData.monthlyKpiProgress.toFixed(1)}%</p>
-              </div>
-              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 sm:col-span-2 lg:col-span-1">
-                <p className="text-sm font-medium text-indigo-600 mb-1">Tỉ lệ chuyển đổi trong ngày (Theo số lượng)</p>
-                <p className="text-lg font-bold text-gray-900">{reportData.conversionRate.toFixed(1)}%</p>
+                <p className="text-sm font-medium text-indigo-600 mb-1">Doanh số lũy kế tháng</p>
+                <p className="text-lg font-bold text-gray-900">{new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(reportData.monthlyTotalAmount)}</p>
               </div>
             </div>
 
-            {/* --- BẢNG DỮ LIỆU CHI TIẾT --- */}
             <div>
-              <h3 className="text-lg font-bold text-gray-900 mb-4">Bảng số liệu chi tiết</h3>
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Bảng số liệu chi tiết trong ngày</h3>
               <div className="overflow-x-auto rounded-lg border border-gray-200">
                 <table className="min-w-full divide-y divide-gray-200">
                   <thead className="bg-gray-50">
@@ -344,7 +240,6 @@ export default function PGReport() {
                       </tr>
                     )}
                   </tbody>
-                  {/* Dòng tính tổng footer */}
                   {reportData.tableData.length > 0 && (
                     <tfoot className="bg-gray-50 font-bold border-t border-gray-300">
                       <tr>

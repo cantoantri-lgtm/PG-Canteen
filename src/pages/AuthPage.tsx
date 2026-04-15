@@ -25,7 +25,7 @@ export default function AuthPage() {
       // 1. Truy vấn trực tiếp vào bảng profiles để tìm số điện thoại
       const { data, error } = await supabase
         .from('profiles')
-        .select('*')
+        .select('*, roles(role_name)')
         .eq('phone_number', phone.trim())
         .single(); // single() sẽ báo lỗi nếu không tìm thấy hoặc tìm thấy > 1 dòng
 
@@ -46,7 +46,11 @@ export default function AuthPage() {
       }
 
       // 4. Nếu mọi thứ đúng, lưu thông tin vào LocalStorage
-      localStorage.setItem('shop_user', JSON.stringify(data));
+      const userData = {
+        ...data,
+        role_name: data.roles?.role_name
+      };
+      localStorage.setItem('shop_user', JSON.stringify(userData));
       
       toast.success(`Chào mừng ${data.full_name}!`);
       

@@ -917,7 +917,7 @@ export default function PGDashboard() {
       {/* MODAL XÁC NHẬN OCR (SELF-LEARNING) */}
       {showOcrModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-2xl shadow-xl w-[95vw] max-w-md overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-4 border-b border-gray-100 bg-indigo-50/50">
               <h3 className="text-lg font-bold text-indigo-900">Xác nhận sản phẩm</h3>
               <p className="text-sm text-indigo-600 mt-1">Hệ thống cần bạn xác nhận một số sản phẩm chưa rõ ràng trên hóa đơn.</p>
@@ -941,11 +941,11 @@ export default function PGDashboard() {
                     <X className="w-3 h-3" />
                   </button>
                   <div className="flex justify-between items-start mb-2">
-                    <div>
+                    <div className="flex-1 min-w-0 pr-2">
                       <span className="text-xs font-semibold text-gray-500 uppercase">Tên trên bill:</span>
-                      <p className="font-medium text-gray-900">{item.original_name}</p>
+                      <p className="font-medium text-gray-900 truncate">{item.original_name}</p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right whitespace-nowrap">
                       <span className="text-xs font-semibold text-gray-500 uppercase">SL/Giá:</span>
                       <p className="font-bold text-indigo-700">{item.qty} x {new Intl.NumberFormat('vi-VN').format(item.price)}đ</p>
                     </div>
@@ -1008,7 +1008,7 @@ export default function PGDashboard() {
       {/* MODAL TÌM SẢN PHẨM THỦ CÔNG */}
       {manualSelectIndex !== null && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
+          <div className="bg-white rounded-2xl shadow-xl w-[95vw] max-w-md overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-4 border-b border-gray-100 bg-indigo-50/50 flex justify-between items-center">
               <h3 className="text-lg font-bold text-indigo-900">Tìm sản phẩm</h3>
               <button onClick={() => setManualSelectIndex(null)} className="text-gray-500 hover:text-gray-700"><X className="w-5 h-5" /></button>
@@ -1017,23 +1017,23 @@ export default function PGDashboard() {
             <div className="p-4 overflow-y-auto flex-1 space-y-4">
               <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 mb-4">
                 <span className="text-xs font-semibold text-gray-500 uppercase">Đang tìm cho:</span>
-                <p className="font-medium text-gray-900">{pendingOcrItems[manualSelectIndex]?.original_name}</p>
+                <p className="font-medium text-gray-900 truncate">{pendingOcrItems[manualSelectIndex]?.original_name}</p>
               </div>
 
               <div className="space-y-3">
-                <select className="w-full p-2.5 border rounded-xl" value={manualCategory} onChange={e => {setManualCategory(e.target.value); setManualProductGroup(''); setManualProductId('');}}>
+                <select className="w-full p-2.5 border rounded-xl bg-white max-w-full overflow-hidden text-ellipsis" value={manualCategory} onChange={e => {setManualCategory(e.target.value); setManualProductGroup(''); setManualProductId('');}}>
                   <option value="">-- Lọc Ngành hàng --</option>
                   {uniqueCategories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
-                <select className="w-full p-2.5 border rounded-xl" value={manualBrand} onChange={e => {setManualBrand(e.target.value); setManualProductGroup(''); setManualProductId('');}}>
+                <select className="w-full p-2.5 border rounded-xl bg-white max-w-full overflow-hidden text-ellipsis" value={manualBrand} onChange={e => {setManualBrand(e.target.value); setManualProductGroup(''); setManualProductId('');}}>
                   <option value="">-- Lọc Hãng --</option>
                   {manualUniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
-                <select className="w-full p-2.5 border rounded-xl" value={manualProductGroup} onChange={e => {setManualProductGroup(e.target.value); setManualProductId('');}}>
+                <select className="w-full p-2.5 border rounded-xl bg-white max-w-full overflow-hidden text-ellipsis" value={manualProductGroup} onChange={e => {setManualProductGroup(e.target.value); setManualProductId('');}}>
                   <option value="" disabled>Chọn Nhóm SP...</option>
                   {manualUniqueProductGroupNames.map(name => <option key={name} value={name}>{name}</option>)}
                 </select>
-                <select className="w-full p-2.5 border rounded-xl" value={manualProductId} onChange={e => setManualProductId(e.target.value)}>
+                <select className="w-full p-2.5 border rounded-xl bg-white max-w-full overflow-hidden text-ellipsis" value={manualProductId} onChange={e => setManualProductId(e.target.value)}>
                   <option value="" disabled>Chọn Sản phẩm...</option>
                   {manualAvailableProducts.map(p => (
                     <option key={p.product_id} value={p.product_id}>{p.product_name || 'Mặc định'}</option>

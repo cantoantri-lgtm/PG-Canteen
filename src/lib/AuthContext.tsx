@@ -6,6 +6,8 @@ export interface Profile {
   full_name: string;
   admin_role: boolean;
   role?: string;
+  role_id?: string;
+  role_name?: string;
   phone_number: string;
   dob?: string;
   email?: string;
