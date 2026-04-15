@@ -41,7 +41,7 @@ const ProtectedRoute = ({ children, requireAdmin = false, allowSup = false }: { 
                   user?.role === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
   
   if (requireAdmin && !isAdmin && !(allowSup && isSup)) return <Navigate to="/dashboard" />;
 
@@ -57,7 +57,8 @@ const DashboardRouter = () => {
                   user?.role === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  return isAdmin ? <AdminDashboard /> : <PGDashboard />;
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  return (isAdmin || isSup) ? <AdminDashboard /> : <PGDashboard />;
 };
 
 export default function App() {
