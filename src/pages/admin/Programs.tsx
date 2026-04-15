@@ -35,9 +35,24 @@ export default function Programs() {
   const [assignSupProgramId, setAssignSupProgramId] = useState<string | null>(null);
 
   const { data: programs = [], isLoading } = useQuery({
-    queryKey: ['programs'],
+    queryKey: ['programs', isSup, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('programs').select('*').order('start_date', { ascending: false });
+      let query = supabase.from('programs').select('*').order('start_date', { ascending: false });
+      
+      if (isSup && user?.id) {
+        // Get assigned program IDs first
+        const { data: assigned } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        
+        const assignedIds = assigned?.map(a => a.program_id) || [];
+        if (assignedIds.length === 0) return [];
+        
+        query = query.in('program_id', assignedIds);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as Program[];
     }
@@ -414,22 +429,6 @@ export default function Programs() {
                               <button onClick={() => handleEdit(program)} className="text-indigo-600 hover:text-indigo-900 mr-4" title="Sửa"><Edit2 className="h-4 w-4" /></button>
                               <button onClick={() => handleDelete(program.program_id)} className="text-red-600 hover:text-red-900" title="Xóa"><Trash2 className="h-4 w-4" /></button>
                             </>
-                          )}
-                          {isSup && (
-                            supPrograms.includes(program.program_id) ? (
-                              <span className="inline-flex items-center text-green-600 text-sm font-medium">
-                                <Check className="h-4 w-4 mr-1" />
-                                Đã đăng ký
-                              </span>
-                            ) : (
-                              <button 
-                                onClick={() => registerProgramMutation.mutate(program.program_id)}
-                                disabled={registerProgramMutation.isPending}
-                                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50"
-                              >
-                                Đăng ký
-                              </button>
-                            )
                           )}
                         </td>
                       </tr>

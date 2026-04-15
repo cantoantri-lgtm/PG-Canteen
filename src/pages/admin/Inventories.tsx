@@ -81,9 +81,33 @@ export default function Inventories() {
   });
 
   const { data: brands = [] } = useQuery({
-    queryKey: ['brands'],
+    queryKey: ['brands', isSup, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('brands').select('brand_id, brand_name');
+      let query = supabase.from('brands').select('brand_id, brand_name');
+      
+      if (isSup && user?.id) {
+        // Get assigned program IDs
+        const { data: assigned } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        
+        const assignedIds = assigned?.map(a => a.program_id) || [];
+        if (assignedIds.length === 0) return [];
+        
+        // Get brands linked to these programs
+        const { data: progBrands } = await supabase
+          .from('program_brands')
+          .select('brand_id')
+          .in('program_id', assignedIds);
+        
+        const brandIds = progBrands?.map(b => b.brand_id) || [];
+        if (brandIds.length === 0) return [];
+        
+        query = query.in('brand_id', brandIds);
+      }
+
+      const { data, error } = await query.order('brand_name');
       if (error) throw error;
       return data;
     }

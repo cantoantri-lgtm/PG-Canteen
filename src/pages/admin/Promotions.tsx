@@ -6,6 +6,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 interface PromotionCondition {
   id?: string;
@@ -56,6 +57,10 @@ interface Promotion {
 }
 
 export default function Promotions() {
+  const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Promotion>>({});
@@ -70,9 +75,23 @@ export default function Promotions() {
   const [expandedPromotionId, setExpandedPromotionId] = useState<string | null>(null);
 
   const { data: programs = [] } = useQuery({
-    queryKey: ['programs'],
+    queryKey: ['programs', isSup, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('programs').select('*').order('program_name');
+      let query = supabase.from('programs').select('*');
+      
+      if (isSup && user?.id) {
+        const { data: assigned } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        
+        const assignedIds = assigned?.map(a => a.program_id) || [];
+        if (assignedIds.length === 0) return [];
+        
+        query = query.in('program_id', assignedIds);
+      }
+
+      const { data, error } = await query.order('program_name');
       if (error) throw error;
       return data;
     }
@@ -133,9 +152,25 @@ export default function Promotions() {
   });
 
   const { data: promotions = [], isLoading } = useQuery({
-    queryKey: ['promotions'],
+    queryKey: ['promotions', isSup, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('promotions').select('*, programs(program_name, start_date, end_date), channels(channel_name), accounts(account_name), shops(shop_name)').order('promotion_name');
+      let query = supabase
+        .from('promotions')
+        .select('*, programs!inner(program_name, start_date, end_date), channels(channel_name), accounts(account_name), shops(shop_name)');
+      
+      if (isSup && user?.id) {
+        const { data: assigned } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        
+        const assignedIds = assigned?.map(a => a.program_id) || [];
+        if (assignedIds.length === 0) return [];
+        
+        query = query.in('program_id', assignedIds);
+      }
+
+      const { data, error } = await query.order('promotion_name');
       if (error) throw error;
       
       const promotionsWithDetails = await Promise.all((data as Promotion[]).map(async (p) => {

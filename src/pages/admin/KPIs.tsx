@@ -7,6 +7,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
+import { useAuth } from '../../lib/AuthContext';
 
 interface KPI {
   kpi_id: string;
@@ -23,6 +24,10 @@ interface Profile {
 }
 
 export default function KPIs() {
+  const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<KPI>>({});
@@ -33,25 +38,36 @@ export default function KPIs() {
 
   // 1. Fetch Data
   const { data: kpis = [], isLoading: loadingKpis } = useQuery({
-    queryKey: ['kpis'],
+    queryKey: ['kpis', user?.id, isSup],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('kpis')
-        .select('*, profiles(full_name)')
+        .select('*, profiles!inner(full_name, manager_id)')
         .order('start_date', { ascending: false });
+      
+      if (isSup && user?.id) {
+        query = query.eq('profiles.manager_id', user.id);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data as KPI[];
     }
   });
 
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
-    queryKey: ['profiles'],
+    queryKey: ['profiles', user?.id, isSup],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('profiles')
         .select('id, full_name')
-        .eq('admin_role', false)
-        .order('full_name');
+        .eq('admin_role', false);
+      
+      if (isSup && user?.id) {
+        query = query.eq('manager_id', user.id);
+      }
+
+      const { data, error } = await query.order('full_name');
       if (error) throw error;
       return data as Profile[];
     }

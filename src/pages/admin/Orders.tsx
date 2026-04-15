@@ -75,9 +75,9 @@ export default function Orders() {
 
   // --- 1. LẤY DỮ LIỆU TỪ SUPABASE ---
   const { data: orders = [], isLoading: loadingOrders, error: ordersError } = useQuery({
-    queryKey: ['admin_orders_list', user?.id],
+    queryKey: ['admin_orders_list', user?.id, isSup],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('order_details')
         .select(`
           id, order_id, product_id, qty, net_value, switched_from_brand,
@@ -89,8 +89,22 @@ export default function Orders() {
             product_name,
             product_group!inner(brand_id)
           )
-        `)
-        .order('id', { ascending: false });
+        `);
+
+      if (isSup && user?.id) {
+        // Get assigned program IDs first
+        const { data: assigned } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        
+        const assignedIds = assigned?.map(a => a.program_id) || [];
+        if (assignedIds.length === 0) return [];
+        
+        query = query.in('orders.program_id', assignedIds);
+      }
+
+      const { data, error } = await query.order('id', { ascending: false });
       
       if (error) {
         console.error('Lỗi tải đơn hàng:', error);
@@ -153,9 +167,23 @@ export default function Orders() {
   });
 
   const { data: programs = [] } = useQuery({
-    queryKey: ['programs_list'],
+    queryKey: ['programs_list', isSup, user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase.from('programs').select('program_id, program_name').order('program_name');
+      let query = supabase.from('programs').select('program_id, program_name');
+      
+      if (isSup && user?.id) {
+        const { data: assigned } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        
+        const assignedIds = assigned?.map(a => a.program_id) || [];
+        if (assignedIds.length === 0) return [];
+        
+        query = query.in('program_id', assignedIds);
+      }
+
+      const { data, error } = await query.order('program_name');
       if (error) throw error;
       return data;
     }
