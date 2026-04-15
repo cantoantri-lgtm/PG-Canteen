@@ -5,8 +5,11 @@ import { useAuth } from '../../lib/AuthContext';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 
 export default function ProgramReport() {
-  const { user } = useAuth();
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const { user, loading: authLoading } = useAuth();
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -20,12 +23,13 @@ export default function ProgramReport() {
       if (error) throw error;
       return data.map(sp => sp.program_id);
     },
-    enabled: isSup && !!user?.id
+    enabled: !authLoading && isSup && !!user?.id
   });
 
   const { data: programs = [] } = useQuery({
-    queryKey: ['programs', supPrograms],
+    queryKey: ['programs', supPrograms, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       let query = supabase.from('programs').select('program_id, program_name').order('start_date', { ascending: false });
       if (isSup && supPrograms.length > 0) {
         query = query.in('program_id', supPrograms);
@@ -34,13 +38,14 @@ export default function ProgramReport() {
       }
       const { data } = await query;
       return (data || []) as any[];
-    }
+    },
+    enabled: !authLoading
   });
 
   const { data: orders = [], isLoading: loadingOrders } = useQuery({
-    queryKey: ['program_orders', selectedProgramId, selectedDate],
+    queryKey: ['program_orders', selectedProgramId, selectedDate, user?.id, isSup, authLoading],
     queryFn: async () => {
-      if (!selectedProgramId) return [];
+      if (authLoading || !selectedProgramId) return [];
       
       const date = new Date(selectedDate);
       const start = startOfMonth(date).toISOString();
@@ -100,7 +105,7 @@ export default function ProgramReport() {
         };
       });
     },
-    enabled: !!selectedProgramId,
+    enabled: !authLoading && !!selectedProgramId,
   });
 
   const reportData = useMemo(() => {

@@ -3,7 +3,7 @@ import { format, subDays, startOfMonth, subMonths, eachDayOfInterval, endOfMonth
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
-export function useSmartReport(masterData: any, isOpen: boolean = true, endDateStr?: string) {
+export function useSmartReport(masterData: any, isOpen: boolean = true, endDateStr?: string, isSup: boolean = false, userId?: string) {
   let today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
   const actualToday = new Date();
   if (today > actualToday) {
@@ -15,13 +15,31 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
   const sameDayLastMonth = subMonths(today, 1);
 
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['smart_report_orders', today.toISOString().split('T')[0]],
+    queryKey: ['smart_report_orders', today.toISOString().split('T')[0], isSup, userId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('orders')
-        .select('*')
+        .select('*, profiles!inner(manager_id)')
         .gte('created_at', startOfLastM.toISOString())
         .lte('created_at', today.toISOString());
+      
+      if (isSup && userId) {
+        const { data: assignedPrograms } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', userId);
+        const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
+        
+        if (assignedProgramIds.length > 0) {
+          query = query.in('program_id', assignedProgramIds);
+        } else {
+          return [];
+        }
+        
+        query = query.eq('profiles.manager_id', userId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data || [];
     },

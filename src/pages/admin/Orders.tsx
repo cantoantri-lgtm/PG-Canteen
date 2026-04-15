@@ -33,8 +33,11 @@ interface Brand { brand_id: string; brand_name: string; }
 interface Product { product_id: string; product_name: string; brand_id: string; value: number; }
 
 export default function Orders() {
-  const { user } = useAuth();
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const { user, loading: authLoading } = useAuth();
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
 
   // --- STATES ---
@@ -75,15 +78,16 @@ export default function Orders() {
 
   // --- 1. LẤY DỮ LIỆU TỪ SUPABASE ---
   const { data: orders = [], isLoading: loadingOrders, error: ordersError } = useQuery({
-    queryKey: ['admin_orders_list', user?.id, isSup],
+    queryKey: ['admin_orders_list', user?.id, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       let query = supabase
         .from('order_details')
         .select(`
           id, order_id, product_id, qty, net_value, switched_from_brand,
           orders!inner(
             cart_id, created_at, pg_id, program_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
-            profiles(full_name, manager_id)
+            profiles!inner(full_name, manager_id)
           ),
           products(
             product_name,
@@ -145,7 +149,8 @@ export default function Orders() {
       }
 
       return flattenedData;
-    }
+    },
+    enabled: !authLoading
   });
 
   const { data: profiles = [] } = useQuery({
@@ -167,8 +172,9 @@ export default function Orders() {
   });
 
   const { data: programs = [] } = useQuery({
-    queryKey: ['programs_list', isSup, user?.id],
+    queryKey: ['programs_list', isSup, user?.id, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       let query = supabase.from('programs').select('program_id, program_name');
       
       if (isSup && user?.id) {
@@ -186,7 +192,8 @@ export default function Orders() {
       const { data, error } = await query.order('program_name');
       if (error) throw error;
       return data;
-    }
+    },
+    enabled: !authLoading
   });
 
   const { data: products = [] } = useQuery({

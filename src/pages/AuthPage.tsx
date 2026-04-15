@@ -48,7 +48,7 @@ export default function AuthPage() {
       // 4. Nếu mọi thứ đúng, lưu thông tin vào LocalStorage
       const userData = {
         ...data,
-        role_name: data.roles?.role_name
+        role_name: Array.isArray(data.roles) ? data.roles[0]?.role_name : data.roles?.role_name
       };
       localStorage.setItem('shop_user', JSON.stringify(userData));
       

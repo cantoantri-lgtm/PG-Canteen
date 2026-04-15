@@ -7,6 +7,7 @@ import {
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
 import { useRealtimeSync } from '../hooks/useRealtimeSync';
+import { useAuth } from '../lib/AuthContext';
 import { ArrowUp, ArrowDown, Sparkles, Mail, CheckCircle2 } from 'lucide-react';
 import { PGDetailModal } from '../components/PGDetailModal';
 import { SmartReportModal } from '../components/SmartReportModal';
@@ -37,6 +38,13 @@ interface MasterData {
 }
 
 export default function AdminDashboard() {
+  const { user, loading: authLoading } = useAuth();
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const [startDateInput, setStartDateInput] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [selectedShopInput, setSelectedShopInput] = useState('');
@@ -60,8 +68,9 @@ export default function AdminDashboard() {
   const [showSmartReport, setShowSmartReport] = useState(false);
 
   const { data: masterData, isLoading: loadingMaster } = useQuery({
-    queryKey: ['masterData'],
+    queryKey: ['masterData', user?.id, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return null;
       const [shopsRes, brandsRes, productsRes, profilesRes, kpisRes, schedulesRes, programsRes, rolesRes] = await Promise.all([
         supabase.from('shops').select('*').order('shop_name'),
         supabase.from('brands').select('*').order('brand_name'),
@@ -73,14 +82,28 @@ export default function AdminDashboard() {
         supabase.from('roles').select('*')
       ]);
 
-      if (shopsRes.error) console.error('Lỗi tải shops:', shopsRes.error);
-      if (brandsRes.error) console.error('Lỗi tải brands:', brandsRes.error);
-      if (productsRes.error) console.error('Lỗi tải products:', productsRes.error);
-      if (profilesRes.error) console.error('Lỗi tải profiles:', profilesRes.error);
-      if (kpisRes.error) console.error('Lỗi tải kpis:', kpisRes.error);
-      if (schedulesRes.error) console.error('Lỗi tải schedules:', schedulesRes.error);
-      if (programsRes.error) console.error('Lỗi tải programs:', programsRes.error);
-      if (rolesRes.error) console.error('Lỗi tải roles:', rolesRes.error);
+      let programs = programsRes.data || [];
+      let profiles = profilesRes.data || [];
+      let kpis = kpisRes.data || [];
+      let schedules = schedulesRes.data || [];
+
+      if (isSup && user?.id) {
+        // Filter programs
+        const { data: assignedPrograms } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
+        programs = programs.filter(p => assignedProgramIds.includes(p.program_id));
+
+        // Filter profiles (managed PGs)
+        profiles = profiles.filter(p => p.manager_id === user.id || p.id === user.id);
+        const managedPgIds = profiles.map(p => p.id);
+
+        // Filter KPIs and Schedules
+        kpis = kpis.filter(k => managedPgIds.includes(k.pg_id));
+        schedules = schedules.filter(s => managedPgIds.includes(s.pg_id) && assignedProgramIds.includes(s.program_id));
+      }
 
       return {
         shops: shopsRes.data || [],
@@ -89,40 +112,58 @@ export default function AdminDashboard() {
           ...p,
           brand_id: Array.isArray(p.product_group) ? p.product_group[0]?.brand_id : p.product_group?.brand_id
         })),
-        profiles: profilesRes.data || [],
-        kpis: kpisRes.data || [],
-        schedules: schedulesRes.data || [],
-        programs: programsRes.data || [],
+        profiles,
+        kpis,
+        schedules,
+        programs,
         roles: rolesRes.data || []
       } as MasterData;
     },
-    retry: false
+    retry: false,
+    enabled: !authLoading
   });
 
-  const { report: smartReportData } = useSmartReport(masterData, true, appliedFilters.endDate);
+  const { report: smartReportData } = useSmartReport(masterData, !authLoading, appliedFilters.endDate, isSup, user?.id);
 
   const { data: ordersData = [], isLoading: loadingOrders, error: ordersError } = useQuery({
-    queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate],
+    queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate, user?.id, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       const start = new Date(appliedFilters.startDate);
       start.setHours(0, 0, 0, 0);
       const end = new Date(appliedFilters.endDate);
       end.setHours(23, 59, 59, 999);
 
-      // Query order_details and join with orders (header)
-      const { data, error } = await supabase
+      let query = supabase
         .from('order_details')
         .select(`
           *,
           orders!inner(
             id, cart_id, created_at, pg_id, program_id, shop_id,
             customer_name, customer_phone,
-            profiles(full_name, manager_id)
+            profiles!inner(full_name, manager_id)
           )
         `)
         .gte('orders.created_at', start.toISOString())
         .lte('orders.created_at', end.toISOString());
 
+      if (isSup && user?.id) {
+        const { data: assignedPrograms } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
+        
+        if (assignedProgramIds.length > 0) {
+          query = query.in('orders.program_id', assignedProgramIds);
+        } else {
+          return [];
+        }
+        
+        query = query.eq('orders.profiles.manager_id', user.id);
+      }
+
+      const { data, error } = await query;
       if (error) {
         console.error('Lỗi tải dữ liệu đơn hàng:', error);
         return [];
@@ -142,7 +183,8 @@ export default function AdminDashboard() {
         manager_id: item.orders.profiles?.manager_id
       }));
     },
-    retry: false
+    retry: false,
+    enabled: !authLoading
   });
 
   const orderSyncConfig = useMemo(() => ({

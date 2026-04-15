@@ -34,11 +34,12 @@ export default function Profiles() {
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
 
+  const isSup = user?.role_name?.toUpperCase() === 'SUP';
+
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
-    queryKey: ['profiles', user?.id],
+    queryKey: ['profiles', user?.id, isSup],
     queryFn: async () => {
       let query = supabase.from('profiles').select('*').order('full_name');
-      const isSup = user?.role_name?.toUpperCase() === 'SUP';
       if (isSup && user?.id) {
         query = query.eq('manager_id', user.id);
       }
@@ -97,11 +98,20 @@ export default function Profiles() {
         // Update login_pin and role directly in profiles
         const updateData: any = {};
         if (payload.login_pin) updateData.login_pin = payload.login_pin;
-        if (payload.role) updateData.role_id = payload.role;
+        
+        // Force PG role and current SUP as manager if creator is SUP
+        if (isSup) {
+          const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
+          if (pgRole) updateData.role_id = pgRole.role_id;
+          updateData.manager_id = user?.id;
+        } else {
+          if (payload.role) updateData.role_id = payload.role;
+          if (payload.manager_id) updateData.manager_id = payload.manager_id;
+        }
+
         updateData.created_by = user?.id;
         updateData.created_date = new Date().toISOString();
         updateData.status = payload.status !== undefined ? payload.status : true;
-        if (payload.manager_id) updateData.manager_id = payload.manager_id;
         
         if (Object.keys(updateData).length > 0) {
           await supabase.from('profiles').update(updateData).eq('phone_number', payload.phone_number);
@@ -138,13 +148,13 @@ export default function Profiles() {
 
   const handleAdd = () => {
     setIsAdding(true);
-    const isSup = user?.role_name?.toUpperCase() === 'SUP';
+    const isSupUser = user?.role_name?.toUpperCase() === 'SUP';
     const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
     setEditForm({ 
       admin_role: false, 
       status: true,
-      role: isSup && pgRole ? pgRole.role_id : undefined,
-      manager_id: isSup ? user?.id : undefined
+      role: isSupUser && pgRole ? pgRole.role_id : undefined,
+      manager_id: isSupUser ? user?.id : undefined
     });
     setIsModalOpen(true);
   };
@@ -307,40 +317,46 @@ export default function Profiles() {
               <input type="text" maxLength={6} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2" value={editForm.login_pin || ''} onChange={e => setEditForm({...editForm, login_pin: e.target.value})} />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Vai trò</label>
-            <select className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" value={editForm.role || ''} onChange={e => setEditForm({...editForm, role: e.target.value})}>
-              <option value="">-- Chọn vai trò --</option>
-              {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">Người quản lý</label>
-            <select 
-              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" 
-              value={editForm.manager_id || ''} 
-              onChange={e => setEditForm({...editForm, manager_id: e.target.value})}
-            >
-              <option value="">-- Không có quản lý --</option>
-              {profiles
-                .filter(p => p.id !== editForm.id) // Không tự quản lý chính mình
-                .filter(p => {
-                  const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
-                  return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
-                })
-                .map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.full_name} ({p.phone_number})
-                  </option>
-                ))
-              }
-            </select>
-          </div>
-          <div className="flex items-center mt-4 justify-between">
-            <div className="flex items-center">
-              <input id="admin_role" type="checkbox" className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={editForm.admin_role || false} onChange={e => setEditForm({...editForm, admin_role: e.target.checked})} />
-              <label htmlFor="admin_role" className="ml-2 block text-sm text-gray-900">Quyền Quản trị viên</label>
+          {!isSup && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Vai trò</label>
+              <select className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" value={editForm.role || ''} onChange={e => setEditForm({...editForm, role: e.target.value})}>
+                <option value="">-- Chọn vai trò --</option>
+                {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
+              </select>
             </div>
+          )}
+          {!isSup && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Người quản lý</label>
+              <select 
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" 
+                value={editForm.manager_id || ''} 
+                onChange={e => setEditForm({...editForm, manager_id: e.target.value})}
+              >
+                <option value="">-- Không có quản lý --</option>
+                {profiles
+                  .filter(p => p.id !== editForm.id) // Không tự quản lý chính mình
+                  .filter(p => {
+                    const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
+                    return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
+                  })
+                  .map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.full_name} ({p.phone_number})
+                    </option>
+                  ))
+                }
+              </select>
+            </div>
+          )}
+          <div className="flex items-center mt-4 justify-between">
+            {!isSup && (
+              <div className="flex items-center">
+                <input id="admin_role" type="checkbox" className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500" checked={editForm.admin_role || false} onChange={e => setEditForm({...editForm, admin_role: e.target.checked})} />
+                <label htmlFor="admin_role" className="ml-2 block text-sm text-gray-900">Quyền Quản trị viên</label>
+              </div>
+            )}
             <div className="flex items-center">
               <label className="mr-3 text-sm font-medium text-gray-700">Trạng thái hoạt động</label>
               <button

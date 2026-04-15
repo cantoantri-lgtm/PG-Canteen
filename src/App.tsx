@@ -37,7 +37,10 @@ const ProtectedRoute = ({ children, requireAdmin = false, allowSup = false }: { 
   if (loading) return <div>Đang tải...</div>;
   if (!user) return <Navigate to="/" />;
   
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
   
   if (requireAdmin && !isAdmin && !(allowSup && isSup)) return <Navigate to="/dashboard" />;
@@ -50,9 +53,11 @@ const DashboardRouter = () => {
   
   if (loading) return <div>Đang tải...</div>;
   
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP';
-  return (isAdmin || isSup) ? <AdminDashboard /> : <PGDashboard />;
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  return isAdmin ? <AdminDashboard /> : <PGDashboard />;
 };
 
 export default function App() {

@@ -20,7 +20,10 @@ interface Program {
 
 export default function Programs() {
   const { user } = useAuth();
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
 
   const queryClient = useQueryClient();

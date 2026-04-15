@@ -16,7 +16,10 @@ export default function Layout() {
     return <Navigate to="/" state={{ from: location }} replace />;
   }
 
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
 
   const adminNavigation = [
@@ -27,6 +30,8 @@ export default function Layout() {
     { name: 'Accounts', href: '/dashboard/admin/accounts', icon: Store, category: 'Channel, Account, Cửa hàng' },
     { name: 'Cửa hàng (Shops)', href: '/dashboard/admin/shops', icon: Store, category: 'Channel, Account, Cửa hàng' },
     { name: 'Bản đồ Cửa hàng', href: '/dashboard/admin/shop-map', icon: Store, category: 'Channel, Account, Cửa hàng' },
+    { name: 'Thương hiệu', href: '/dashboard/admin/brands', icon: Tag, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
+    { name: 'Nhóm sản phẩm', href: '/dashboard/admin/product-groups', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Sản phẩm', href: '/dashboard/admin/products', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Hoạt động' },
@@ -72,7 +77,7 @@ export default function Layout() {
           <h1 className="text-xl font-bold text-gray-800">DUC PG Activation Web APP</h1>
           <p className="text-sm text-gray-500 mt-1">{user?.full_name}</p>
           <span className="inline-flex items-center rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-inset ring-blue-700/10 mt-2">
-            {isAdmin ? 'Quản trị viên' : 'Nhân viên PG'}
+            {isAdmin ? 'Quản trị viên' : (isSup ? 'Supervisor' : 'Nhân viên PG')}
           </span>
         </div>
         
@@ -131,7 +136,7 @@ export default function Layout() {
         <div className="md:hidden bg-white border-b border-gray-200 p-4 flex justify-between items-center sticky top-0 z-10">
           <div>
             <h1 className="text-lg font-bold text-gray-800">DUC PG Activation Web APP</h1>
-            <p className="text-xs text-gray-500">{user?.full_name} ({isAdmin ? 'Quản trị viên' : 'Nhân viên PG'})</p>
+            <p className="text-xs text-gray-500">{user?.full_name} ({isAdmin ? 'Quản trị viên' : (isSup ? 'Supervisor' : 'Nhân viên PG')})</p>
           </div>
           <button onClick={signOut} className="text-gray-500 p-2">
             <LogOut className="h-5 w-5" />

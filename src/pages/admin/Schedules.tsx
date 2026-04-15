@@ -27,8 +27,11 @@ interface Shop { shop_id: string; shop_name: string; }
 interface Program { program_id: string; program_name: string; }
 
 export default function Schedules() {
-  const { user } = useAuth();
-  const isAdmin = user?.admin_role === true || user?.role === 'admin' || user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const { user, loading: authLoading } = useAuth();
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP';
 
   const queryClient = useQueryClient();
@@ -51,13 +54,14 @@ export default function Schedules() {
       if (error) throw error;
       return data.map(sp => sp.program_id);
     },
-    enabled: isSup && !!user?.id
+    enabled: !authLoading && isSup && !!user?.id
   });
 
   // 1. FETCH DATA (Đã fix lỗi !pg_id)
   const { data: schedules = [], isLoading: loadingSchedules } = useQuery({
-    queryKey: ['schedules', user?.id],
+    queryKey: ['schedules', user?.id, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       let query = supabase
         .from('schedules')
         .select('*, profiles!pg_id(full_name, manager_id), shops(shop_name), programs(program_name)')
@@ -70,19 +74,22 @@ export default function Schedules() {
         return (data as any[]).filter(s => s.profiles?.manager_id === user.id) as Schedule[];
       }
       return data as Schedule[];
-    }
+    },
+    enabled: !authLoading
   });
 
   const { data: profiles = [] } = useQuery({
-    queryKey: ['profiles', user?.id],
+    queryKey: ['profiles', user?.id, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       let query = supabase.from('profiles').select('id, full_name').eq('admin_role', false).order('full_name');
       if (isSup && user?.id) {
         query = query.eq('manager_id', user.id);
       }
       const { data } = await query;
       return (data || []) as Profile[];
-    }
+    },
+    enabled: !authLoading
   });
 
   const { data: shops = [] } = useQuery({
@@ -94,8 +101,9 @@ export default function Schedules() {
   });
 
   const { data: programs = [] } = useQuery({
-    queryKey: ['programs', supPrograms],
+    queryKey: ['programs', supPrograms, isSup, authLoading],
     queryFn: async () => {
+      if (authLoading) return [];
       let query = supabase.from('programs').select('program_id, program_name').order('start_date', { ascending: false });
       if (isSup && supPrograms.length > 0) {
         query = query.in('program_id', supPrograms);
@@ -104,7 +112,8 @@ export default function Schedules() {
       }
       const { data } = await query;
       return (data || []) as Program[];
-    }
+    },
+    enabled: !authLoading
   });
 
   // 2. ĐỒNG BỘ REALTIME (Đã fix lỗi !pg_id)
