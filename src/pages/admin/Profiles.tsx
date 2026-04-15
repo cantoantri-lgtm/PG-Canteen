@@ -3,7 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 import { useAuth } from '../../lib/AuthContext';
@@ -26,6 +26,13 @@ interface Profile {
 
 export default function Profiles() {
   const { user } = useAuth();
+  const isAdmin = user?.admin_role === true || 
+                  user?.role === 'admin' || 
+                  user?.role_name?.toUpperCase() === 'ADMIN' || 
+                  user?.email?.toLowerCase() === 'can.toantri@gmail.com';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+
+  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Profile>>({});
   const [isAdding, setIsAdding] = useState(false);
@@ -33,8 +40,6 @@ export default function Profiles() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
-
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
 
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
     queryKey: ['profiles', user?.id, isSup],
@@ -102,10 +107,16 @@ export default function Profiles() {
         // Force PG role and current SUP as manager if creator is SUP
         if (isSup) {
           const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
-          if (pgRole) updateData.role_id = pgRole.role_id;
+          if (pgRole) {
+            updateData.role_id = pgRole.role_id;
+            updateData.role = pgRole.role_id;
+          }
           updateData.manager_id = user?.id;
         } else {
-          if (payload.role) updateData.role_id = payload.role;
+          if (payload.role) {
+            updateData.role_id = payload.role;
+            updateData.role = payload.role;
+          }
           if (payload.manager_id) updateData.manager_id = payload.manager_id;
         }
 
@@ -143,12 +154,18 @@ export default function Profiles() {
       if (error) throw error;
       return id;
     },
-    onSuccess: () => toast.success('Đã xóa người dùng!')
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      toast.success('Đã xóa người dùng!');
+    },
+    onError: (error: any) => {
+      toast.error(`Lỗi khi xóa: ${error.message}`);
+    }
   });
 
   const handleAdd = () => {
     setIsAdding(true);
-    const isSupUser = user?.role_name?.toUpperCase() === 'SUP';
+    const isSupUser = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
     const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
     setEditForm({ 
       admin_role: false, 
