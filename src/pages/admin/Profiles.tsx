@@ -89,7 +89,7 @@ export default function Profiles() {
   const saveMutation = useMutation({
     mutationFn: async (payload: Partial<Profile>) => {
       if (isAdding) {
-        // Create user via RPC
+        // 1. Create user via RPC
         const { error: rpcError } = await supabase.rpc('create_user_by_admin', {
           p_dob: payload.dob || null,
           p_full_name: payload.full_name,
@@ -100,19 +100,30 @@ export default function Profiles() {
         });
         if (rpcError) throw rpcError;
 
-        // Update login_pin and role directly in profiles
+        // 2. Fetch the newly created profile to get its ID (safer than updating by phone)
+        const { data: newProfile } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('phone_number', payload.phone_number)
+          .maybeSingle();
+
+        // 3. Update additional fields
         const updateData: any = {};
         if (payload.login_pin) updateData.login_pin = payload.login_pin;
         
-        // Force PG role and current SUP as manager if creator is SUP
+        // Determine role and manager
+        const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
+        
         if (isSup) {
-          const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
-          if (pgRole) {
-            updateData.role_id = pgRole.role_id;
-            updateData.role = pgRole.role_id;
+          // Force PG role and current SUP as manager if creator is SUP
+          const roleId = pgRole?.role_id || payload.role;
+          if (roleId) {
+            updateData.role_id = roleId;
+            updateData.role = roleId;
           }
           updateData.manager_id = user?.id;
         } else {
+          // Admin can specify
           if (payload.role) {
             updateData.role_id = payload.role;
             updateData.role = payload.role;
@@ -125,7 +136,15 @@ export default function Profiles() {
         updateData.status = payload.status !== undefined ? payload.status : true;
         
         if (Object.keys(updateData).length > 0) {
-          await supabase.from('profiles').update(updateData).eq('phone_number', payload.phone_number);
+          const updateQuery = newProfile?.id 
+            ? supabase.from('profiles').update(updateData).eq('id', newProfile.id)
+            : supabase.from('profiles').update(updateData).eq('phone_number', payload.phone_number);
+          
+          const { error: updateError } = await updateQuery;
+          if (updateError) {
+            console.error('Error updating profile:', updateError);
+            throw new Error(`Lỗi cập nhật thông tin bổ sung: ${updateError.message}`);
+          }
         }
         return payload;
       } else {
