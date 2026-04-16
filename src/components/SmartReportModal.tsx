@@ -3,37 +3,108 @@ import { X, Sparkles, TrendingUp, TrendingDown, AlertCircle, Lightbulb, Calendar
 import { format, subDays, startOfMonth, subMonths, eachDayOfInterval, endOfMonth, isSunday } from 'date-fns';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthContext';
 
 interface SmartReportModalProps {
   isOpen: boolean;
   onClose: () => void;
   masterData: any;
   endDateStr?: string;
+  appliedFilters?: any;
 }
 
-export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: SmartReportModalProps) {
-  let today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
-  const actualToday = new Date();
-  if (today > actualToday) {
-    today = actualToday;
-  }
-  const yesterday = subDays(today, 1);
-  const startOfThisMonth = startOfMonth(today);
-  const startOfLastM = startOfMonth(subMonths(today, 1));
-  const sameDayLastMonth = subMonths(today, 1);
+export function SmartReportModal({ isOpen, onClose, masterData, endDateStr, appliedFilters }: SmartReportModalProps) {
+  const { user } = useAuth();
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
-  const [activeTab, setActiveTab] = useState<'daily' | 'monthly'>('daily');
+  // Determine the period based on appliedFilters
+  let periodEnd = appliedFilters?.endDate ? new Date(appliedFilters.endDate + 'T23:59:59.999') : new Date();
+  const actualToday = new Date();
+  if (periodEnd > actualToday) {
+    periodEnd = actualToday;
+  }
+  
+  let periodStart = appliedFilters?.startDate ? new Date(appliedFilters.startDate + 'T00:00:00.000') : startOfMonth(periodEnd);
+  if (periodStart > periodEnd) {
+    periodStart = startOfMonth(periodEnd);
+  }
+  
+  // Calculate the previous period of the same length
+  const durationMs = periodEnd.getTime() - periodStart.getTime();
+  const prevPeriodEnd = new Date(periodStart.getTime() - 1);
+  const prevPeriodStart = new Date(prevPeriodEnd.getTime() - durationMs);
+
+  const [activeTab, setActiveTab] = useState<'daily' | 'monthly'>('monthly'); // Default to period view
 
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['smart_report_orders', today.toISOString().split('T')[0]],
+    queryKey: ['smart_report_orders', periodStart.toISOString(), periodEnd.toISOString(), appliedFilters, user?.id, isSup],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .gte('created_at', startOfLastM.toISOString())
-        .lte('created_at', today.toISOString());
+      let query = supabase
+        .from('order_details')
+        .select(`
+          *,
+          orders!inner(
+            created_at, pg_id, program_id, shop_id,
+            profiles!inner(manager_id)
+          )
+        `)
+        .gte('orders.created_at', prevPeriodStart.toISOString())
+        .lte('orders.created_at', periodEnd.toISOString());
+
+      if (isSup && user?.id) {
+        const { data: assignedPrograms } = await supabase
+          .from('sup_programs')
+          .select('program_id')
+          .eq('sup_id', user.id);
+        const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
+        
+        if (assignedProgramIds.length > 0) {
+          query = query.in('orders.program_id', assignedProgramIds);
+        } else {
+          return [];
+        }
+        
+        query = query.eq('orders.profiles.manager_id', user.id);
+      }
+
+      if (appliedFilters?.programId) {
+        query = query.eq('orders.program_id', appliedFilters.programId);
+      }
+      if (appliedFilters?.shopId) {
+        query = query.eq('orders.shop_id', appliedFilters.shopId);
+      }
+      if (appliedFilters?.brandId) {
+        const productIds = masterData?.products?.filter((p: any) => p.brand_id === appliedFilters.brandId).map((p: any) => p.product_id) || [];
+        if (productIds.length > 0) {
+          query = query.in('product_id', productIds);
+        } else {
+          return [];
+        }
+      }
+      if (appliedFilters?.productId) {
+        query = query.eq('product_id', appliedFilters.productId);
+      }
+      if (appliedFilters?.managerId) {
+        query = query.eq('orders.profiles.manager_id', appliedFilters.managerId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
-      return data || [];
+      
+      // Flatten the data to match the expected structure in the report logic
+      return (data || []).map(item => {
+        const product = masterData?.products?.find((p: any) => p.product_id === item.product_id);
+        const brand_id = product?.brand_id;
+          
+        return {
+          ...item,
+          created_at: item.orders.created_at,
+          pg_id: item.orders.pg_id,
+          program_id: item.orders.program_id,
+          shop_id: item.orders.shop_id,
+          brand_id: brand_id
+        };
+      });
     },
     enabled: isOpen
   });
@@ -41,8 +112,8 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
   const report = useMemo(() => {
     if (!orders || !masterData) return null;
 
-    const todayStr = format(today, 'yyyy-MM-dd');
-    const yesterdayStr = format(yesterday, 'yyyy-MM-dd');
+    const todayStr = format(periodEnd, 'yyyy-MM-dd');
+    const yesterdayStr = format(subDays(periodEnd, 1), 'yyyy-MM-dd');
 
     let revToday = 0, revYesterday = 0, revThisMonth = 0, revLastMonthUpToToday = 0;
     const pgStats: Record<string, { id: string, name: string, today: number, yesterday: number, thisMonth: number, lastMonth: number }> = {};
@@ -61,8 +132,8 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
 
       const isToday = dateStr === todayStr;
       const isYesterday = dateStr === yesterdayStr;
-      const isThisMonth = orderDate >= startOfThisMonth;
-      const isLastMonthUpToToday = orderDate >= startOfLastM && orderDate <= sameDayLastMonth;
+      const isThisMonth = orderDate >= periodStart && orderDate <= periodEnd;
+      const isLastMonthUpToToday = orderDate >= prevPeriodStart && orderDate <= prevPeriodEnd;
 
       if (isToday) revToday += val;
       if (isYesterday) revYesterday += val;
@@ -218,10 +289,10 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
     const monthlyRecommendations: { title: string, problem: string, cause: string, solution: string }[] = [];
 
     // KPI Analysis
-    const monthDays = eachDayOfInterval({ start: startOfMonth(today), end: endOfMonth(today) });
+    const monthDays = eachDayOfInterval({ start: startOfMonth(periodEnd), end: endOfMonth(periodEnd) });
     const workingDaysInMonth = monthDays.filter(d => !isSunday(d)).length || 1;
     
-    const daysUpToToday = eachDayOfInterval({ start: startOfMonth(today), end: today });
+    const daysUpToToday = eachDayOfInterval({ start: periodStart, end: periodEnd });
     const workingDaysUpToToday = daysUpToToday.filter(d => !isSunday(d)).length;
 
     const expectedMonthlyAchievement = (workingDaysUpToToday / workingDaysInMonth) * 100;
@@ -263,12 +334,12 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
         let trendStr = '';
         if (p.diffToday > 0) {
             const pct = p.yesterday > 0 ? (p.diffToday / p.yesterday) * 100 : 100;
-            trendStr = `Tăng ${formatCurrency(p.diffToday)} (${pct.toFixed(1)}%) so với hôm qua`;
+            trendStr = `Tăng ${formatCurrency(p.diffToday)} (${pct.toFixed(1)}%) so với ngày trước đó`;
         } else if (p.diffToday < 0) {
             const pct = p.yesterday > 0 ? (Math.abs(p.diffToday) / p.yesterday) * 100 : 100;
-            trendStr = `Giảm ${formatCurrency(Math.abs(p.diffToday))} (${pct.toFixed(1)}%) so với hôm qua`;
+            trendStr = `Giảm ${formatCurrency(Math.abs(p.diffToday))} (${pct.toFixed(1)}%) so với ngày trước đó`;
         } else {
-            trendStr = `Đi ngang so với hôm qua`;
+            trendStr = `Đi ngang so với ngày trước đó`;
         }
 
         const dailyShortfall = p.dailyKpi - p.today;
@@ -276,7 +347,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
       });
 
       dailyRecommendations.push({
-        title: `Cảnh báo KPI Ngày: Các PG chưa đạt chỉ tiêu hôm nay`,
+        title: `Cảnh báo KPI Ngày: Các PG chưa đạt chỉ tiêu ngày cuối kỳ`,
         problem: `Có ${missedDailyPGsOnly.length} PG đang chậm tiến độ KPI ngày.\n${details.join('\n')}`,
         cause: `Nguyên nhân có thể do kỹ năng tiếp cận khách hàng chưa tốt, hoặc lượng khách tại điểm bán thấp.`,
         solution: `Quản lý cần can thiệp ngay với các PG đang đi lùi/đi ngang. Phân tích nguyên nhân tại điểm bán và hỗ trợ trực tiếp.`
@@ -293,9 +364,9 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
       });
 
       monthlyRecommendations.push({
-        title: `Cảnh báo KPI Tháng: Các PG chưa đạt tiến độ chuẩn`,
-        problem: `Có ${missedMonthlyPGsOnly.length} PG đang chậm tiến độ KPI tháng.\n${details.join('\n')}`,
-        cause: `Tiến độ bán hàng chậm hơn so với thời gian đã trôi qua trong tháng.`,
+        title: `Cảnh báo KPI: Các PG chưa đạt tiến độ chuẩn`,
+        problem: `Có ${missedMonthlyPGsOnly.length} PG đang chậm tiến độ KPI.\n${details.join('\n')}`,
+        cause: `Tiến độ bán hàng chậm hơn so với thời gian đã trôi qua trong kỳ.`,
         solution: `Cần rà soát lại kế hoạch bán hàng của các PG này, tìm hiểu khó khăn và đưa ra phương án thúc đẩy doanh số trong các ngày còn lại.`
       });
     }
@@ -305,7 +376,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
         if (pg.worstBrandDiff < 0) {
           monthlyRecommendations.push({
             title: `Vấn đề của PG: ${pg.name}`,
-            problem: `Sụt giảm doanh số tổng thể ${formatCurrency(Math.abs(pg.diff))} so với tháng trước.`,
+            problem: `Sụt giảm doanh số tổng thể ${formatCurrency(Math.abs(pg.diff))} so với kỳ trước.`,
             cause: `Chủ yếu do sự sụt giảm mạnh ở nhóm hàng ${pg.worstBrandName} (giảm ${formatCurrency(Math.abs(pg.worstBrandDiff))}).`,
             solution: `Quản lý cần làm việc trực tiếp với ${pg.name} để kiểm tra kỹ năng tư vấn nhóm hàng ${pg.worstBrandName}. Cần xem xét lại cách trưng bày, tồn kho của nhóm hàng này tại căn tin PG đang làm việc và bổ sung kiến thức sản phẩm nếu cần.`
           });
@@ -318,7 +389,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
         if (brand.worstProductDiff < 0) {
           monthlyRecommendations.push({
             title: `Vấn đề của Nhóm hàng: ${brand.name}`,
-            problem: `Sụt giảm doanh số toàn hệ thống ${formatCurrency(Math.abs(brand.diff))} so với tháng trước.`,
+            problem: `Sụt giảm doanh số toàn hệ thống ${formatCurrency(Math.abs(brand.diff))} so với kỳ trước.`,
             cause: `Doanh số bị kéo xuống chủ yếu bởi sản phẩm ${brand.worstProductName} (giảm ${formatCurrency(Math.abs(brand.worstProductDiff))}).`,
             solution: `Kiểm tra lại tình trạng đứt hàng, giá bán hoặc chương trình khuyến mãi của đối thủ đối với sản phẩm ${brand.worstProductName}. Cân nhắc đẩy mạnh sampling hoặc combo khuyến mãi riêng cho sản phẩm này để lấy lại đà tăng trưởng.`
           });
@@ -353,7 +424,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
 
         monthlyRecommendations.push({
           title: `Lưu ý Nhóm hàng bán chậm: ${brand.name}`,
-          problem: `Nhóm hàng này đang có doanh số thấp nhất hệ thống trong tháng (${formatCurrency(brand.thisMonth)}).`,
+          problem: `Nhóm hàng này đang có doanh số thấp nhất hệ thống trong kỳ (${formatCurrency(brand.thisMonth)}).`,
           cause: `Sản phẩm bán chậm nhất trong nhóm là ${lowestProductName} (${formatCurrency(lowestProductSales === Infinity ? 0 : lowestProductSales)}).`,
           solution: `Cần tìm hiểu nguyên nhân (do giá, ít khuyến mãi, hay nhu cầu thấp). Cân nhắc các chương trình kích cầu hoặc đào tạo lại PG về cách tư vấn nhóm hàng này.`
         });
@@ -398,8 +469,8 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
         const pct = brand.yesterday > 0 ? (Math.abs(brand.diff) / brand.yesterday) * 100 : 100;
         dailyRecommendations.push({
           title: `Cảnh báo Nhóm hàng: ${brand.name}`,
-          problem: `Doanh số nhóm hàng ${brand.name} hôm nay giảm ${formatCurrency(Math.abs(brand.diff))} (${pct.toFixed(1)}%) so với hôm qua.`,
-          cause: `Có thể do thiếu hụt hàng hóa tại điểm bán, hoặc chương trình khuyến mãi kém hấp dẫn hơn đối thủ trong ngày hôm nay.`,
+          problem: `Doanh số nhóm hàng ${brand.name} ngày cuối kỳ giảm ${formatCurrency(Math.abs(brand.diff))} (${pct.toFixed(1)}%) so với ngày trước đó.`,
+          cause: `Có thể do thiếu hụt hàng hóa tại điểm bán, hoặc chương trình khuyến mãi kém hấp dẫn hơn đối thủ trong ngày cuối kỳ.`,
           solution: `Kiểm tra ngay tồn kho của nhóm hàng ${brand.name} tại các căn tin. Nhắc nhở PG tập trung tư vấn và đẩy mạnh nhóm hàng này.`
         });
       });
@@ -430,7 +501,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
 
       dailyRecommendations.push({
         title: `Cảnh báo hệ thống: Doanh số ngày`,
-        problem: `Doanh số toàn hệ thống hôm nay giảm ${formatCurrency(dropAmount)} (${dropPercent.toFixed(1)}%) so với hôm qua.${worstPgText}`,
+        problem: `Doanh số toàn hệ thống ngày cuối kỳ giảm ${formatCurrency(dropAmount)} (${dropPercent.toFixed(1)}%) so với ngày trước đó.${worstPgText}`,
         cause: `Lượng khách tiếp cận có thể thấp hơn hoặc tỉ lệ chuyển đổi giảm.`,
         solution: `Nhắc nhở toàn bộ đội ngũ PG tăng cường hoạt động hoạt náo, chủ động tiếp cận khách hàng vào các khung giờ cao điểm. Đặc biệt cần hỗ trợ sát sao cho các PG đang có dấu hiệu đi lùi trong ngày.`
       });
@@ -440,16 +511,16 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
       dailyRecommendations.push({
         title: `Đánh giá chung (Ngày)`,
         problem: `Không có vấn đề nghiêm trọng.`,
-        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt so với hôm qua.`,
+        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt so với ngày trước đó.`,
         solution: `Tiếp tục duy trì các chiến lược hiện tại và khen thưởng các cá nhân xuất sắc.`
       });
     }
 
     if (monthlyRecommendations.length === 0) {
       monthlyRecommendations.push({
-        title: `Đánh giá chung (Tháng)`,
+        title: `Đánh giá chung (Kỳ báo cáo)`,
         problem: `Không có vấn đề nghiêm trọng.`,
-        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt so với tháng trước.`,
+        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt so với kỳ trước.`,
         solution: `Tiếp tục duy trì các chiến lược hiện tại và khen thưởng các cá nhân xuất sắc.`
       });
     }
@@ -470,14 +541,14 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
     if (growingProducts.length > 0) monthlyHighlights.push(`Sản phẩm đột phá: ${growingProducts[0].name} (+${formatCurrency(growingProducts[0].diff)})`);
 
     const dailySummary = {
-      kpiText: `Doanh số hôm nay đạt ${formatCurrency(revToday)}. (Tiến độ tháng: đạt ${monthKpiPct.toFixed(1)}% / ${formatCurrency(totalMonthlyKpi)})`,
-      periodText: `So với hôm qua: ${todayGrowth > 0 ? 'Tăng' : todayGrowth < 0 ? 'Giảm' : 'Đi ngang'} ${formatCurrency(Math.abs(revToday - revYesterday))} (${Math.abs(todayGrowth).toFixed(1)}%)`,
+      kpiText: `Doanh số ngày cuối kỳ đạt ${formatCurrency(revToday)}. (Tiến độ: đạt ${monthKpiPct.toFixed(1)}% / ${formatCurrency(totalMonthlyKpi)})`,
+      periodText: `So với ngày trước đó: ${todayGrowth > 0 ? 'Tăng' : todayGrowth < 0 ? 'Giảm' : 'Đi ngang'} ${formatCurrency(Math.abs(revToday - revYesterday))} (${Math.abs(todayGrowth).toFixed(1)}%)`,
       highlights: dailyHighlights
     };
 
     const monthlySummary = {
-      kpiText: `Doanh số tháng này đạt ${formatCurrency(revThisMonth)} / ${formatCurrency(totalMonthlyKpi)} (${monthKpiPct.toFixed(1)}% KPI). Tiến độ chuẩn hiện tại là ${monthExpectedPct.toFixed(1)}% -> ${monthKpiPct >= monthExpectedPct ? 'Vượt/Đạt' : 'Chậm'} tiến độ.`,
-      periodText: `So với cùng kỳ tháng trước: ${monthGrowth > 0 ? 'Tăng' : monthGrowth < 0 ? 'Giảm' : 'Đi ngang'} ${formatCurrency(Math.abs(revThisMonth - revLastMonthUpToToday))} (${Math.abs(monthGrowth).toFixed(1)}%)`,
+      kpiText: `Doanh số kỳ này đạt ${formatCurrency(revThisMonth)} / ${formatCurrency(totalMonthlyKpi)} (${monthKpiPct.toFixed(1)}% KPI). Tiến độ chuẩn hiện tại là ${monthExpectedPct.toFixed(1)}% -> ${monthKpiPct >= monthExpectedPct ? 'Vượt/Đạt' : 'Chậm'} tiến độ.`,
+      periodText: `So với kỳ trước: ${monthGrowth > 0 ? 'Tăng' : monthGrowth < 0 ? 'Giảm' : 'Đi ngang'} ${formatCurrency(Math.abs(revThisMonth - revLastMonthUpToToday))} (${Math.abs(monthGrowth).toFixed(1)}%)`,
       highlights: monthlyHighlights
     };
 
@@ -489,7 +560,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
         growingProducts: [], decliningProducts: [], // Not primarily shown in daily
         recommendations: dailyRecommendations,
         summary: dailySummary,
-        currentLabel: 'Hôm nay', previousLabel: 'Hôm qua'
+        currentLabel: 'Ngày cuối kỳ', previousLabel: 'Ngày trước đó'
       },
       monthly: {
         revCurrent: revThisMonth, revPrevious: revLastMonthUpToToday, growth: monthGrowth,
@@ -499,7 +570,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
         growingProducts, decliningProducts,
         recommendations: monthlyRecommendations,
         summary: monthlySummary,
-        currentLabel: 'Tháng này', previousLabel: 'Cùng kỳ tháng trước'
+        currentLabel: 'Kỳ này', previousLabel: 'Kỳ trước'
       }
     };
   }, [orders, masterData]);
@@ -554,7 +625,7 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr }: Sm
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-100'
             }`}
           >
-            Báo cáo tháng
+            Báo cáo kỳ
           </button>
         </div>
 

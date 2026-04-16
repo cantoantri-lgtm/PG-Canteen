@@ -869,6 +869,7 @@ export default function AdminDashboard() {
         onClose={() => setShowSmartReport(false)} 
         masterData={masterData} 
         endDateStr={appliedFilters.endDate}
+        appliedFilters={appliedFilters}
       />
     </div>
   );
