@@ -4,6 +4,7 @@ import { Plus, Edit2, Trash2, ChevronDown, ChevronUp, MapPin, Calendar, User, La
 import { safeFormatDate } from '../../lib/utils';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -29,10 +30,10 @@ interface Program { program_id: string; program_name: string; }
 export default function Schedules() {
   const { user, loading: authLoading } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -45,6 +46,8 @@ export default function Schedules() {
   const [selectedShopFilter, setSelectedShopFilter] = useState('');
   
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { data: supPrograms = [] } = useQuery({
     queryKey: ['sup_programs', user?.id],
@@ -153,6 +156,13 @@ export default function Schedules() {
 
     return Object.values(groups);
   }, [schedules, searchQuery, selectedPgFilter, selectedShopFilter]);
+
+  const totalPages = Math.ceil(groupedSchedules.length / itemsPerPage);
+  const paginatedGroupedSchedules = groupedSchedules.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedPgFilter, selectedShopFilter]);
 
   // 4. CÁC HÀM XỬ LÝ MUTATIONS (Đã fix lỗi !pg_id)
   const saveMutation = useMutation({

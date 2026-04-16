@@ -25,10 +25,10 @@ interface KPI {
 export default function PGReport() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedPgId, setSelectedPgId] = useState<string>(isAdmin || isSup ? '' : (user?.id || ''));
@@ -38,7 +38,7 @@ export default function PGReport() {
   const { data: allProfiles = [] } = useQuery({
     queryKey: ['all_profiles'],
     queryFn: async () => {
-      const { data } = await supabase.from('profiles').select('id, full_name, manager_id, admin_role, role').order('full_name');
+      const { data } = await supabase.from('profiles').select('id, full_name, manager_id, admin_role, role_id').order('full_name');
       return data || [];
     }
   });
@@ -53,7 +53,7 @@ export default function PGReport() {
 
   const managers = useMemo(() => {
     return allProfiles.filter(p => {
-      const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
+      const roleName = roles.find(r => r.role_id === p.role_id)?.role_name || '';
       return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
     });
   }, [allProfiles, roles]);

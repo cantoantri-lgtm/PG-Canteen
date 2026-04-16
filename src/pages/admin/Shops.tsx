@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -24,6 +25,8 @@ export default function Shops() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAccountFilter, setSelectedAccountFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -60,6 +63,13 @@ export default function Shops() {
       return matchesSearch && matchesAccount;
     });
   }, [shops, searchQuery, selectedAccountFilter]);
+
+  const totalPages = Math.ceil(filteredShops.length / itemsPerPage);
+  const paginatedShops = filteredShops.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedAccountFilter]);
 
   // 3. Mutations
   const saveMutation = useMutation({
@@ -195,7 +205,7 @@ export default function Shops() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredShops.map((shop) => (
+                  {paginatedShops.map((shop) => (
                     <tr key={shop.shop_id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{shop.shop_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{shop.accounts?.account_name}</td>
@@ -205,7 +215,7 @@ export default function Shops() {
                       </td>
                     </tr>
                   ))}
-                  {filteredShops.length === 0 && (
+                  {paginatedShops.length === 0 && (
                     <tr>
                       <td colSpan={3} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                         Không tìm thấy cửa hàng nào.
@@ -215,6 +225,13 @@ export default function Shops() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filteredShops.length}
+              itemsPerPage={itemsPerPage}
+            />
           </div>
         </div>
       </div>

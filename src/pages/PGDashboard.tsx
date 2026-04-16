@@ -237,21 +237,41 @@ export default function PGDashboard() {
     enabled: !!user?.id,
   });
 
-  // 4. Lấy dữ liệu Khuyến mãi
-  const { data: activePromotions = [] } = useQuery({
-    queryKey: ['active_promotions', selectedShopId, shops],
+  // 4 & 5. Lấy dữ liệu Khuyến mãi và Tồn kho
+  const { data: promoAndInventoryData } = useQuery({
+    queryKey: ['promo_and_inventory', selectedShopId, pgProfile?.manager_id, shops],
     queryFn: async () => {
+      const supId = pgProfile?.manager_id;
       const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
-      if (!selectedSchedule?.program_id) return [];
+      
+      if (!selectedShopId || !supId || !selectedSchedule?.program_id) {
+        return { promotions: [], inventory: [] };
+      }
 
+      try {
+        // Thử gọi RPC mới
+        const { data: rpcData, error: rpcError } = await supabase.rpc('get_sup_promotions_and_inventory', {
+          p_sup_id: supId,
+          p_shop_id: selectedShopId
+        });
+
+        if (!rpcError && rpcData) {
+          return {
+            promotions: rpcData.promotions || [],
+            inventory: rpcData.inventory || []
+          };
+        }
+      } catch (err) {
+        console.log('RPC chưa được tạo, sử dụng logic fallback...');
+      }
+
+      // Fallback: Logic cũ nếu chưa chạy SQL tạo RPC
       const { data: promos } = await supabase
         .from('promotions')
         .select('*')
         .eq('program_id', selectedSchedule.program_id);
         
-      if (!promos) return [];
-      
-      return await Promise.all(promos.map(async (p) => {
+      const activePromotions = await Promise.all((promos || []).map(async (p) => {
         const { data: tiers } = await supabase.from('promotion_tiers').select('*').eq('promotion_id', p.promotion_id);
         const tiersWithConditions = await Promise.all((tiers || []).map(async (t) => {
           const { data: conds } = await supabase.from('promotion_conditions').select('*').eq('tier_id', t.id);
@@ -259,31 +279,22 @@ export default function PGDashboard() {
         }));
         return { ...p, tiers: tiersWithConditions };
       }));
-    },
-    enabled: !!selectedShopId && shops.length > 0,
-  });
 
-  // 5. Lấy tồn kho hiện tại của cửa hàng (Chỉ lấy của người quản lý trực tiếp)
-  const { data: inventoryData = [] } = useQuery({
-    queryKey: ['shop_inventory', selectedShopId, pgProfile?.manager_id],
-    queryFn: async () => {
-      const supId = pgProfile?.manager_id;
-
-      if (!selectedShopId || !supId) return [];
-      
-      const { data, error } = await supabase
+      const { data: inventory } = await supabase
         .from('inventories')
         .select('product_id, quantity')
         .eq('sup_id', supId);
-        
-      if (error) {
-        console.error('Lỗi tải tồn kho:', error);
-        return [];
-      }
-      return data;
+
+      return {
+        promotions: activePromotions,
+        inventory: inventory || []
+      };
     },
-    enabled: !!selectedShopId && !!pgProfile?.manager_id,
+    enabled: !!selectedShopId && !!pgProfile?.manager_id && shops.length > 0,
   });
+
+  const activePromotions = promoAndInventoryData?.promotions || [];
+  const inventoryData = promoAndInventoryData?.inventory || [];
 
   // --- USE EFFECTS LÀM MƯỢT FORM ---
   
@@ -471,19 +482,17 @@ export default function PGDashboard() {
       return;
     }
 
-    let eligibleNormalTiers: any[] = [];
+    let allNormalTiers: any[] = [];
     let eligibleOntopTiers: any[] = [];
 
     activePromotions.forEach((promo: any) => {
       if (promo.shop_id && promo.shop_id !== selectedShopId) return;
 
       promo.tiers?.forEach((tier: any) => {
-        if (cartTotal >= tier.min_total_qty) {
-          
-          let allConditionsMet = true;
-          
-          tier.conditions?.forEach((cond: any) => {
-            // Xử lý target_values (có thể là Array từ DB)
+        let allConditionsMet = true;
+        
+        if (tier.conditions && tier.conditions.length > 0) {
+          tier.conditions.forEach((cond: any) => {
             const targetValuesStr = Array.isArray(cond.target_values) 
               ? cond.target_values.join(',').toLowerCase() 
               : String(cond.target_values || '').toLowerCase();
@@ -505,36 +514,81 @@ export default function PGDashboard() {
               allConditionsMet = false;
             }
           });
+        }
 
-          if (allConditionsMet && tier.tier_type === 'Quà tặng' && tier.gift_product_id) {
-            const giftProduct = products.find(p => p.product_id === tier.gift_product_id);
-            if (giftProduct) {
-              const giftData = {
-                product_id: giftProduct.product_id,
-                product_name: giftProduct.product_name,
-                qty: tier.gift_quantity || 1,
-                tier_name: tier.tier_name,
-                min_total_qty: tier.min_total_qty 
-              };
+        if (allConditionsMet && tier.tier_type === 'Quà tặng' && tier.gift_product_id) {
+          const giftProduct = products.find(p => p.product_id === tier.gift_product_id);
+          if (giftProduct) {
+            const giftData = {
+              product_id: giftProduct.product_id,
+              product_name: giftProduct.product_name,
+              qty: tier.gift_quantity || 1,
+              tier_name: tier.tier_name,
+              min_total_qty: tier.min_total_qty 
+            };
 
-              // Phân loại ONTOP (cộng dồn) và NORMAL (chỉ lấy cao nhất)
-              if (tier.is_ontop) {
-                eligibleOntopTiers.push(giftData);
-              } else {
-                eligibleNormalTiers.push(giftData);
-              }
+            if (tier.is_ontop) {
+              eligibleOntopTiers.push(giftData);
+            } else {
+              allNormalTiers.push(giftData);
             }
           }
         }
       });
     });
 
-    // Lọc Rổ NORMAL: Chỉ lấy 1 mức có yêu cầu tiền cao nhất
-    eligibleNormalTiers.sort((a, b) => b.min_total_qty - a.min_total_qty);
-    const finalNormalGift = eligibleNormalTiers.length > 0 ? [eligibleNormalTiers[0]] : [];
+    // Nhóm các quà tặng của cùng một mốc (tier) lại với nhau
+    const groupedNormalTiers: Record<string, any> = {};
+    
+    allNormalTiers.forEach(tier => {
+      const key = `${tier.tier_name}_${tier.min_total_qty}`;
+      if (!groupedNormalTiers[key]) {
+        groupedNormalTiers[key] = {
+          tier_name: tier.tier_name,
+          min_total_qty: tier.min_total_qty,
+          gifts: []
+        };
+      }
+      groupedNormalTiers[key].gifts.push(tier);
+    });
 
-    // Gộp 2 rổ lại
-    setApplicableGifts([...finalNormalGift, ...eligibleOntopTiers]);
+    const sortedGroupedTiers = Object.values(groupedNormalTiers).sort((a: any, b: any) => b.min_total_qty - a.min_total_qty);
+
+    let remainingAmount = cartTotal;
+    let finalNormalGifts: any[] = [];
+
+    // Tính toán quà tặng dựa trên số tiền còn lại (Greedy algorithm)
+    for (const group of sortedGroupedTiers) {
+      if (group.min_total_qty <= 0) continue;
+      
+      while (remainingAmount >= group.min_total_qty) {
+        // Thêm tất cả quà tặng của mốc này
+        group.gifts.forEach((gift: any) => {
+          const existingGift = finalNormalGifts.find(g => g.product_id === gift.product_id && g.tier_name === gift.tier_name);
+          if (existingGift) {
+            existingGift.qty += gift.qty;
+          } else {
+            finalNormalGifts.push({ ...gift });
+          }
+        });
+        remainingAmount -= group.min_total_qty;
+      }
+    }
+
+    // Gộp với các gói ON-TOP (cộng dồn, không trừ vào số tiền còn lại)
+    let finalGifts = [...finalNormalGifts];
+    for (const ontop of eligibleOntopTiers) {
+      if (cartTotal >= ontop.min_total_qty) {
+        const existingGift = finalGifts.find(g => g.product_id === ontop.product_id && g.tier_name === ontop.tier_name);
+        if (existingGift) {
+          existingGift.qty += ontop.qty;
+        } else {
+          finalGifts.push({ ...ontop });
+        }
+      }
+    }
+
+    setApplicableGifts(finalGifts);
 
   }, [cart, cartTotal, activePromotions, products, selectedShopId]);
 

@@ -7,10 +7,10 @@ import { format, startOfMonth, endOfMonth } from 'date-fns';
 export default function ProgramReport() {
   const { user, loading: authLoading } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedProgramId, setSelectedProgramId] = useState<string>('');

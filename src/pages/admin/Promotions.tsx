@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2, ChevronDown, ChevronUp, Search, Filter, RefreshCw, Gift, Layers } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -59,10 +60,10 @@ interface Promotion {
 export default function Promotions() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -76,6 +77,8 @@ export default function Promotions() {
   const [activeTierIdx, setActiveTierIdx] = useState<number | null>(null);
   const [activeCondIdx, setActiveCondIdx] = useState<number | null>(null);
   const [expandedPromotionId, setExpandedPromotionId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { data: programs = [] } = useQuery({
     queryKey: ['programs', isSup, user?.id],
@@ -246,6 +249,13 @@ export default function Promotions() {
       return matchesSearch && matchesStatus;
     });
   }, [promotions, searchQuery, selectedProgramFilter]);
+
+  const totalPages = Math.ceil(filteredPromotions.length / itemsPerPage);
+  const paginatedPromotions = filteredPromotions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedProgramFilter]);
 
   const saveMutation = useMutation({
     mutationFn: async ({ payload, tiers }: { payload: any; tiers: PromotionTier[]; isKeepOpen: boolean }) => {
@@ -459,7 +469,7 @@ export default function Promotions() {
           <div className="col-span-1"></div>
         </div>
 
-        {filteredPromotions.map((promotion) => {
+        {paginatedPromotions.map((promotion) => {
           const isExpanded = expandedPromotionId === promotion.promotion_id;
           const now = new Date();
           const startDate = promotion.programs?.start_date ? new Date(promotion.programs.start_date) : null;
@@ -589,12 +599,20 @@ export default function Promotions() {
             </div>
           );
         })}
-        {filteredPromotions.length === 0 && (
+        {paginatedPromotions.length === 0 && (
           <div className="bg-white p-12 rounded-xl border border-dashed border-gray-200 text-center text-gray-400">
             Không tìm thấy chương trình khuyến mãi nào.
           </div>
         )}
       </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        onPageChange={setCurrentPage}
+        totalItems={filteredPromotions.length}
+        itemsPerPage={itemsPerPage}
+      />
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={isAdding ? 'Tạo Chương Trình Khuyến Mãi Mới' : 'Sửa Chương Trình Khuyến Mãi'} maxWidth="max-w-4xl">
         <div className="space-y-6 max-h-[80vh] overflow-y-auto p-1">

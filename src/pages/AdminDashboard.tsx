@@ -40,10 +40,10 @@ interface MasterData {
 export default function AdminDashboard() {
   const { user, loading: authLoading } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const [startDateInput, setStartDateInput] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -578,7 +578,7 @@ export default function AdminDashboard() {
             <option value="">-- Tất cả Quản lý --</option>
             {masterData?.profiles
               .filter(p => {
-                const roleName = masterData.roles?.find(r => r.role_id === p.role)?.role_name || '';
+                const roleName = masterData.roles?.find(r => r.role_id === p.role_id)?.role_name || '';
                 return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
               })
               .map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}

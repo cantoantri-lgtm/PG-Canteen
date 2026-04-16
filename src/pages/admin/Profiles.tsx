@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -14,7 +15,6 @@ interface Profile {
   dob: string;
   phone_number: string;
   admin_role: boolean;
-  role?: string;
   role_id?: string;
   email: string;
   login_pin: string;
@@ -27,10 +27,10 @@ interface Profile {
 export default function Profiles() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -40,6 +40,8 @@ export default function Profiles() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { data: profiles = [], isLoading: loadingProfiles } = useQuery({
     queryKey: ['profiles', user?.id, isSup],
@@ -75,7 +77,7 @@ export default function Profiles() {
       const matchesSearch = p.full_name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                            p.phone_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
                            (p.email || '').toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesRole = selectedRoleFilter === '' || p.role_id === selectedRoleFilter || p.role === selectedRoleFilter;
+      const matchesRole = selectedRoleFilter === '' || p.role_id === selectedRoleFilter;
       const matchesStatus = selectedStatusFilter === 'all' || 
                             (selectedStatusFilter === 'on' && p.status !== false) || 
                             (selectedStatusFilter === 'off' && p.status === false);
@@ -85,6 +87,14 @@ export default function Profiles() {
       manager_name: profiles.find(m => m.id === p.manager_id)?.full_name
     }));
   }, [profiles, searchQuery, selectedRoleFilter, selectedStatusFilter]);
+
+  const totalPages = Math.ceil(filteredProfiles.length / itemsPerPage);
+  const paginatedProfiles = filteredProfiles.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  // Reset to page 1 when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedRoleFilter, selectedStatusFilter]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload: Partial<Profile>) => {
@@ -116,23 +126,20 @@ export default function Profiles() {
         
         if (isSup) {
           // Force PG role and current SUP as manager if creator is SUP
-          const roleId = pgRole?.role_id || payload.role;
+          const roleId = pgRole?.role_id || payload.role_id;
           if (roleId) {
             updateData.role_id = roleId;
-            updateData.role = roleId;
           }
           updateData.manager_id = user?.id;
         } else {
           // Admin can specify
-          if (payload.role) {
-            updateData.role_id = payload.role;
-            updateData.role = payload.role;
+          if (payload.role_id) {
+            updateData.role_id = payload.role_id;
           }
           if (payload.manager_id) updateData.manager_id = payload.manager_id;
         }
 
         updateData.created_by = user?.id;
-        updateData.created_date = new Date().toISOString();
         updateData.status = payload.status !== undefined ? payload.status : true;
         
         if (Object.keys(updateData).length > 0) {
@@ -149,10 +156,6 @@ export default function Profiles() {
         return payload;
       } else {
         const { id, manager_name, ...updateData } = payload as any;
-        if (updateData.role) {
-          updateData.role_id = updateData.role;
-          delete updateData.role;
-        }
         const { error } = await supabase.from('profiles').update(updateData).eq('id', id);
         if (error) throw error;
         return payload;
@@ -184,12 +187,12 @@ export default function Profiles() {
 
   const handleAdd = () => {
     setIsAdding(true);
-    const isSupUser = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+    const isSupUser = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
     const pgRole = roles.find(r => r.role_name.toUpperCase() === 'PG');
     setEditForm({ 
       admin_role: false, 
       status: true,
-      role: isSupUser && pgRole ? pgRole.role_id : undefined,
+      role_id: isSupUser && pgRole ? pgRole.role_id : undefined,
       manager_id: isSupUser ? user?.id : undefined
     });
     setIsModalOpen(true);
@@ -222,10 +225,12 @@ export default function Profiles() {
     <div className="space-y-6">
       <div className="sm:flex sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Quản lý Người dùng</h2>
-        <button onClick={handleAdd} className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
-          <Plus className="-ml-1 mr-2 h-5 w-5" />
-          Thêm Người dùng
-        </button>
+        {isAdmin && (
+          <button onClick={handleAdd} className="mt-3 sm:mt-0 inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
+            <Plus className="-ml-1 mr-2 h-5 w-5" />
+            Thêm Người dùng
+          </button>
+        )}
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
@@ -282,7 +287,7 @@ export default function Profiles() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredProfiles.map((profile) => (
+                  {paginatedProfiles.map((profile) => (
                     <tr key={profile.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900">{profile.full_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.phone_number}</td>
@@ -290,9 +295,9 @@ export default function Profiles() {
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.email || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{profile.dob || '-'}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
-                        {profile.role_id || profile.role ? (
+                        {profile.role_id ? (
                           <span className="inline-flex items-center rounded-md bg-green-50 px-2 py-1 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                            {roles.find(r => r.role_id === (profile.role_id || profile.role))?.role_name || profile.role}
+                            {roles.find(r => r.role_id === profile.role_id)?.role_name || profile.role_id}
                           </span>
                         ) : profile.admin_role ? (
                           <span className="inline-flex items-center rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-700/10">Admin</span>
@@ -313,9 +318,9 @@ export default function Profiles() {
                       </td>
                     </tr>
                   ))}
-                  {filteredProfiles.length === 0 && (
+                  {paginatedProfiles.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                      <td colSpan={8} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                         Không tìm thấy người dùng nào.
                       </td>
                     </tr>
@@ -323,6 +328,13 @@ export default function Profiles() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filteredProfiles.length}
+              itemsPerPage={itemsPerPage}
+            />
           </div>
         </div>
       </div>
@@ -356,7 +368,7 @@ export default function Profiles() {
           {!isSup && (
             <div>
               <label className="block text-sm font-medium text-gray-700">Vai trò</label>
-              <select className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" value={editForm.role || ''} onChange={e => setEditForm({...editForm, role: e.target.value})}>
+              <select className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white" value={editForm.role_id || ''} onChange={e => setEditForm({...editForm, role_id: e.target.value})}>
                 <option value="">-- Chọn vai trò --</option>
                 {roles.map(r => <option key={r.role_id} value={r.role_id}>{r.role_name}</option>)}
               </select>
@@ -374,7 +386,7 @@ export default function Profiles() {
                 {profiles
                   .filter(p => p.id !== editForm.id) // Không tự quản lý chính mình
                   .filter(p => {
-                    const roleName = roles.find(r => r.role_id === p.role)?.role_name || '';
+                    const roleName = roles.find(r => r.role_id === p.role_id)?.role_name || '';
                     return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
                   })
                   .map(p => (

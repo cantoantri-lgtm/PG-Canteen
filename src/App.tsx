@@ -38,10 +38,10 @@ const ProtectedRoute = ({ children, requireAdmin = false, allowSup = false }: { 
   if (!user) return <Navigate to="/" />;
   
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
   
   if (requireAdmin && !isAdmin && !(allowSup && isSup)) return <Navigate to="/dashboard" />;
 
@@ -54,10 +54,10 @@ const DashboardRouter = () => {
   if (loading) return <div>Đang tải...</div>;
   
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
   return (isAdmin || isSup) ? <AdminDashboard /> : <PGDashboard />;
 };
 

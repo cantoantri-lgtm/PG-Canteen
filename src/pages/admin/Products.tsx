@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -61,6 +62,8 @@ export default function Products() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
   
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -127,6 +130,13 @@ export default function Products() {
       return matchesSearch && matchesBrand && matchesType;
     });
   }, [products, productGroups, searchQuery, selectedBrandFilter, selectedTypeFilter]);
+
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const paginatedProducts = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedBrandFilter, selectedTypeFilter]);
 
   const uniqueBrands = useMemo(() => {
     const brandsMap = new Map();
@@ -394,7 +404,7 @@ export default function Products() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredProducts.map((product) => {
+                  {paginatedProducts.map((product) => {
                     const pg = productGroups.find(g => g.id === product.product_group_id);
                     const brand = pg ? brands.find(b => b.brand_id === pg.brand_id) : null;
                     return (
@@ -420,9 +430,23 @@ export default function Products() {
                       </td>
                     </tr>
                   )})}
+                  {paginatedProducts.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
+                        Không tìm thấy sản phẩm nào.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filteredProducts.length}
+              itemsPerPage={itemsPerPage}
+            />
           </div>
         </div>
       </div>

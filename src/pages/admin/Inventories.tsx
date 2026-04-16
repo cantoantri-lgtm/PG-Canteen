@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -21,10 +22,10 @@ interface Inventory {
 export default function Inventories() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editForm, setEditForm] = useState<Partial<Inventory>>({});
@@ -34,6 +35,8 @@ export default function Inventories() {
   const [selectedSupFilter, setSelectedSupFilter] = useState('');
   const [selectedProductFilter, setSelectedProductFilter] = useState('');
   const [selectedModalBrand, setSelectedModalBrand] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { data: profiles = [] } = useQuery({
     queryKey: ['profiles'],
@@ -150,6 +153,13 @@ export default function Inventories() {
       return matchesSearch && matchesSup && matchesProduct;
     });
   }, [inventories, searchQuery, selectedSupFilter, selectedProductFilter]);
+
+  const totalPages = Math.ceil(filteredInventories.length / itemsPerPage);
+  const paginatedInventories = filteredInventories.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedSupFilter, selectedProductFilter]);
 
   const saveMutation = useMutation({
     mutationFn: async ({ payload }: { payload: any; isKeepOpen: boolean }) => {
@@ -299,7 +309,7 @@ export default function Inventories() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredInventories.map((inv) => (
+                  {paginatedInventories.map((inv) => (
                     <tr key={inv.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
                         {inv.profiles?.full_name || 'Không xác định'}
@@ -319,12 +329,19 @@ export default function Inventories() {
                       </td>
                     </tr>
                   ))}
-                  {filteredInventories.length === 0 && (
+                  {paginatedInventories.length === 0 && (
                     <tr><td colSpan={5} className="py-8 text-center text-gray-500">Không có dữ liệu tồn kho.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filteredInventories.length}
+              itemsPerPage={itemsPerPage}
+            />
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2, ChevronDown, ChevronRight, Check } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -21,10 +22,10 @@ interface Program {
 export default function Programs() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -36,6 +37,8 @@ export default function Programs() {
   const [selectedSupId, setSelectedSupId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [assignSupProgramId, setAssignSupProgramId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   const { data: programs = [], isLoading } = useQuery({
     queryKey: ['programs', isSup, user?.id],
@@ -164,6 +167,13 @@ export default function Programs() {
       p.program_name.toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [programs, searchQuery]);
+
+  const totalPages = Math.ceil(filteredPrograms.length / itemsPerPage);
+  const paginatedPrograms = filteredPrograms.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   const saveMutation = useMutation({
     mutationFn: async ({ payload }: { payload: any; isKeepOpen: boolean }) => {
@@ -395,7 +405,7 @@ export default function Programs() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredPrograms.map((program) => (
+                  {paginatedPrograms.map((program) => (
                     <React.Fragment key={program.program_id}>
                       <tr className={expandedProgramId === program.program_id ? 'bg-indigo-50' : ''}>
                         <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
@@ -425,7 +435,7 @@ export default function Programs() {
                           {isAdmin && (
                             <>
                               <button onClick={() => setAssignSupProgramId(program.program_id)} className="text-green-600 hover:text-green-900 mr-4" title="Phân công SUP">
-                                <svg xmlns="http://www.0w.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
                                   <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
                                 </svg>
                               </button>
@@ -499,7 +509,7 @@ export default function Programs() {
                       )}
                     </React.Fragment>
                   ))}
-                  {filteredPrograms.length === 0 && (
+                  {paginatedPrograms.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                         Không tìm thấy chương trình nào.
@@ -509,6 +519,13 @@ export default function Programs() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filteredPrograms.length}
+              itemsPerPage={itemsPerPage}
+            />
           </div>
         </div>
       </div>

@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2, Download, Eye } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -35,10 +36,10 @@ interface Product { product_id: string; product_name: string; brand_id: string; 
 export default function Orders() {
   const { user, loading: authLoading } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   // --- STATES ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -50,6 +51,8 @@ export default function Orders() {
   const [selectedPgFilter, setSelectedPgFilter] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
   const [selectedProgramFilter, setSelectedProgramFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 30;
   
   // State cho xem ảnh Bill
   const [viewingBillImages, setViewingBillImages] = useState<string[] | null>(null);
@@ -232,6 +235,13 @@ export default function Orders() {
       return matchesSearch && matchesPg && matchesBrand && matchesProgram;
     });
   }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter]);
+
+  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
+  const paginatedOrders = filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter]);
 
   // --- 3. MUTATIONS (THÊM / SỬA / XÓA) ---
   const saveMutation = useMutation({
@@ -612,7 +622,7 @@ export default function Orders() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredOrders.map((order) => (
+                  {paginatedOrders.map((order) => (
                     <tr key={order.id} className="hover:bg-gray-50">
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
                         <div className="font-mono text-[10px] text-gray-400 uppercase">{order.cart_id}</div>
@@ -681,10 +691,20 @@ export default function Orders() {
                       </td>
                     </tr>
                   ))}
-                  {filteredOrders.length === 0 && <tr><td colSpan={9} className="px-6 py-8 text-center text-gray-500">Không tìm thấy đơn hàng nào.</td></tr>}
+                  {paginatedOrders.length === 0 && <tr><td colSpan={10} className="px-6 py-8 text-center text-gray-500">Không tìm thấy đơn hàng nào.</td></tr>}
                 </tbody>
               </table>
             </div>
+            
+            {totalPages > 1 && (
+              <div className="mt-4">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase';
 import { Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -26,6 +27,8 @@ export default function ProductGroups() {
   const [isAdding, setIsAdding] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   // 1. Fetch Data with React Query
   const { data: productGroups = [], isLoading } = useQuery({
@@ -60,6 +63,13 @@ export default function ProductGroups() {
       (pg.brands?.brand_name || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
   }, [productGroups, searchQuery]);
+
+  const totalPages = Math.ceil(filteredGroups.length / itemsPerPage);
+  const paginatedGroups = filteredGroups.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
 
   // 2. Mutations
   const saveMutation = useMutation({
@@ -195,7 +205,7 @@ export default function ProductGroups() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredGroups.map((group) => (
+                  {paginatedGroups.map((group) => (
                     <tr key={group.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{group.name}</td>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm text-gray-500 sm:pl-6">{group.brands?.brand_name}</td>
@@ -205,7 +215,7 @@ export default function ProductGroups() {
                       </td>
                     </tr>
                   ))}
-                  {filteredGroups.length === 0 && (
+                  {paginatedGroups.length === 0 && (
                     <tr>
                       <td colSpan={3} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
                         Không tìm thấy nhóm hàng nào.
@@ -215,6 +225,13 @@ export default function ProductGroups() {
                 </tbody>
               </table>
             </div>
+            <Pagination
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onPageChange={setCurrentPage}
+              totalItems={filteredGroups.length}
+              itemsPerPage={itemsPerPage}
+            />
           </div>
         </div>
       </div>

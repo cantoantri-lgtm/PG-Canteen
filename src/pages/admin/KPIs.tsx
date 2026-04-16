@@ -4,6 +4,7 @@ import { Plus, Edit2, Trash2 } from 'lucide-react';
 import { safeFormatDate } from '../../lib/utils';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
+import Pagination from '../../components/Pagination';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
@@ -26,10 +27,10 @@ interface Profile {
 export default function KPIs() {
   const { user } = useAuth();
   const isAdmin = user?.admin_role === true || 
-                  user?.role === 'admin' || 
+                  user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role?.toUpperCase() === 'SUP';
+  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -38,6 +39,8 @@ export default function KPIs() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPgFilter, setSelectedPgFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   // 1. Fetch Data
   const { data: kpis = [], isLoading: loadingKpis } = useQuery({
@@ -91,6 +94,13 @@ export default function KPIs() {
       return matchesSearch && matchesPg;
     });
   }, [kpis, searchQuery, selectedPgFilter]);
+
+  const totalPages = Math.ceil(filteredKpis.length / itemsPerPage);
+  const paginatedKpis = filteredKpis.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedPgFilter]);
 
   // 2. Mutations
   const saveMutation = useMutation({
@@ -249,7 +259,7 @@ export default function KPIs() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {filteredKpis.map((kpi) => (
+                  {paginatedKpis.map((kpi) => (
                     <tr key={kpi.kpi_id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">{kpi.profiles?.full_name}</td>
                       <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">{safeFormatDate(kpi.start_date, 'dd/MM/yyyy')}</td>
@@ -261,12 +271,22 @@ export default function KPIs() {
                       </td>
                     </tr>
                   ))}
-                  {filteredKpis.length === 0 && (
+                  {paginatedKpis.length === 0 && (
                     <tr><td colSpan={5} className="px-6 py-8 text-center text-gray-500">Không tìm thấy chỉ tiêu nào.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
+            
+            {totalPages > 1 && (
+              <div className="mt-4">
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
