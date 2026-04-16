@@ -18,26 +18,30 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr, appl
   const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   // Determine the period based on appliedFilters
-  let periodEnd = appliedFilters?.endDate ? new Date(appliedFilters.endDate + 'T23:59:59.999') : new Date();
-  const actualToday = new Date();
-  if (periodEnd > actualToday) {
-    periodEnd = actualToday;
-  }
-  
-  let periodStart = appliedFilters?.startDate ? new Date(appliedFilters.startDate + 'T00:00:00.000') : startOfMonth(periodEnd);
-  if (periodStart > periodEnd) {
-    periodStart = startOfMonth(periodEnd);
-  }
-  
-  // Calculate the previous period of the same length
-  const durationMs = periodEnd.getTime() - periodStart.getTime();
-  const prevPeriodEnd = new Date(periodStart.getTime() - 1);
-  const prevPeriodStart = new Date(prevPeriodEnd.getTime() - durationMs);
+  const { periodStart, periodEnd, prevPeriodStart, prevPeriodEnd } = useMemo(() => {
+    let end = appliedFilters?.endDate ? new Date(appliedFilters.endDate + 'T23:59:59.999') : new Date();
+    const actualToday = new Date();
+    if (end > actualToday) {
+      end = actualToday;
+    }
+    
+    let start = appliedFilters?.startDate ? new Date(appliedFilters.startDate + 'T00:00:00.000') : startOfMonth(end);
+    if (start > end) {
+      start = startOfMonth(end);
+    }
+    
+    // Calculate the previous period of the same length
+    const durationMs = end.getTime() - start.getTime();
+    const prevEnd = new Date(start.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - durationMs);
+
+    return { periodStart: start, periodEnd: end, prevPeriodStart: prevStart, prevPeriodEnd: prevEnd };
+  }, [appliedFilters]);
 
   const [activeTab, setActiveTab] = useState<'daily' | 'monthly'>('monthly'); // Default to period view
 
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['smart_report_orders', periodStart.toISOString(), periodEnd.toISOString(), appliedFilters, user?.id, isSup],
+    queryKey: ['smart_report_orders', appliedFilters, user?.id, isSup],
     queryFn: async () => {
       let query = supabase
         .from('order_details')
