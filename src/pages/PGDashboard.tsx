@@ -4,7 +4,8 @@ import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
-import { Camera, Check, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Camera, Check, X, FileText, UserCircle } from 'lucide-react';
 import { matchProduct, learnAlias, logOcrError } from '../services/ocrLearningService';
 import Scanbill from '../components/Scanbill';
 
@@ -727,6 +728,18 @@ export default function PGDashboard() {
   return (
     <div className="space-y-6 max-w-lg mx-auto pb-10 px-4">
       <h2 className="text-2xl font-bold text-gray-900 pt-6">Bảng điều khiển PG</h2>
+      
+      {/* QUICK LINKS FOR PG */}
+      <div className="grid grid-cols-2 gap-3">
+        <Link to="/dashboard/report" className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-indigo-700 font-medium">
+          <FileText className="w-5 h-5" />
+          <span>Báo cáo ngày</span>
+        </Link>
+        <Link to="/dashboard/profile" className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-indigo-700 font-medium">
+          <UserCircle className="w-5 h-5" />
+          <span>Hồ sơ cá nhân</span>
+        </Link>
+      </div>
 
       {/* WIDGET BÁO CÁO */}
       <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">

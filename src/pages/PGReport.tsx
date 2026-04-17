@@ -78,12 +78,15 @@ export default function PGReport() {
 
   const isManager = !isAdmin && !isSup && allProfiles.some(p => p.manager_id === user?.id);
   const canSelectPg = isAdmin || isSup || isManager;
+  
+  // Failsafe: Always use user.id if PG
+  const pgIdToUse = canSelectPg ? selectedPgId : user?.id;
 
   // Fetch orders for the selected PG and month
   const { data: orders = [], isLoading: loadingOrders } = useQuery({
-    queryKey: ['pg_orders', selectedPgId, selectedDate],
+    queryKey: ['pg_orders', pgIdToUse, selectedDate],
     queryFn: async () => {
-      if (!selectedPgId) return [];
+      if (!pgIdToUse) return [];
       
       const date = new Date(selectedDate);
       const start = startOfMonth(date).toISOString();
@@ -103,7 +106,7 @@ export default function PGReport() {
             )
           )
         `)
-        .eq('orders.pg_id', selectedPgId)
+        .eq('orders.pg_id', pgIdToUse)
         .gte('orders.created_at', start)
         .lte('orders.created_at', end);
         
@@ -138,9 +141,9 @@ export default function PGReport() {
 
   // Fetch KPIs for the selected PG
   const { data: kpis = [] } = useQuery({
-    queryKey: ['pg_kpis', selectedPgId, selectedDate],
+    queryKey: ['pg_kpis', pgIdToUse, selectedDate],
     queryFn: async () => {
-      if (!selectedPgId) return [];
+      if (!pgIdToUse) return [];
       const date = new Date(selectedDate);
       const start = startOfMonth(date).toISOString().split('T')[0];
       const end = endOfMonth(date).toISOString().split('T')[0];
@@ -148,21 +151,21 @@ export default function PGReport() {
       const { data, error } = await supabase
         .from('kpis')
         .select('*')
-        .eq('pg_id', selectedPgId)
+        .eq('pg_id', pgIdToUse)
         .gte('end_date', start)
         .lte('start_date', end);
         
       if (error) throw error;
       return data as KPI[];
     },
-    enabled: !!selectedPgId,
+    enabled: !!pgIdToUse,
   });
 
   const reportData = useMemo(() => {
-    if (!selectedPgId) return null;
+    if (!pgIdToUse) return null;
 
     const pgName = (isAdmin || isManager)
-      ? allProfiles.find(p => p.id === selectedPgId)?.full_name || 'Không xác định'
+      ? allProfiles.find(p => p.id === pgIdToUse)?.full_name || 'Không xác định'
       : user?.full_name || 'Không xác định';
 
     // Lọc đơn hàng của đúng ngày được chọn
@@ -281,7 +284,7 @@ export default function PGReport() {
 
         {loadingOrders ? (
           <div className="text-center py-10 text-gray-500">Đang tải dữ liệu báo cáo...</div>
-        ) : !selectedPgId ? (
+        ) : !pgIdToUse ? (
           <div className="text-center py-10 text-gray-500">Vui lòng chọn nhân viên PG để xem báo cáo.</div>
         ) : reportData ? (
           <div className="space-y-8">
