@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect } from 'react';
+import React, { useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { supabase } from './lib/supabase';
@@ -30,6 +30,31 @@ import Programs from './pages/admin/Programs';
 import Promotions from './pages/admin/Promotions';
 import Inventories from './pages/admin/Inventories';
 import { Toaster } from 'sonner';
+
+class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
+  constructor(props: {children: ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error("UI Lỗi:", error, errorInfo); }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center text-red-600 bg-red-50 min-h-screen">
+          <h1 className="text-2xl font-bold mb-4">Đã xảy ra lỗi giao diện</h1>
+          <p className="mb-4 text-red-700 font-semibold">{this.state.error?.message}</p>
+          <pre className="text-left bg-gray-100 p-4 overflow-auto text-xs text-gray-800 mb-4 h-64 border border-gray-300">
+            {this.state.error?.stack}
+          </pre>
+          <button onClick={() => window.location.href = '/dashboard'} className="px-4 py-2 bg-indigo-600 text-white rounded">Quay lại trang chính</button>
+
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const ProtectedRoute = ({ children, requireAdmin = false, allowSup = false }: { children: React.ReactNode, requireAdmin?: boolean, allowSup?: boolean }) => {
   const { user, loading } = useAuth();
@@ -63,10 +88,11 @@ const DashboardRouter = () => {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Toaster position="top-right" richColors />
-        <Routes>
+    <ErrorBoundary>
+      <AuthProvider>
+        <Router>
+          <Toaster position="top-right" richColors />
+          <Routes>
           <Route path="/" element={<AuthPage />} />
           
           <Route 
@@ -102,5 +128,6 @@ export default function App() {
         </Routes>
       </Router>
     </AuthProvider>
+    </ErrorBoundary>
   );
 }

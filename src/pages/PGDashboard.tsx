@@ -100,7 +100,7 @@ export default function PGDashboard() {
   });
 
   // 1. Lấy danh sách Cửa hàng của PG
-  const { data: shops = [] } = useQuery({
+  const { data: rawShops } = useQuery({
     queryKey: ['pg_shops', user?.id],
     queryFn: async () => {
       if (!user?.id) return [];
@@ -111,9 +111,10 @@ export default function PGDashboard() {
     },
     enabled: !!user?.id,
   });
+  const shops = React.useMemo(() => rawShops || [], [rawShops]);
 
   // 2. Lấy danh sách Sản phẩm được phép bán (Từ SQL View)
-  const { data: products = [] } = useQuery({
+  const { data: rawProducts } = useQuery({
     queryKey: ['allowed_products', user?.id, selectedShopId], 
     queryFn: async () => {
       if (!user?.id || !selectedShopId) return [];
@@ -199,9 +200,10 @@ export default function PGDashboard() {
     },
     enabled: !!user?.id && !!selectedShopId,
   });
+  const products = React.useMemo(() => rawProducts || [], [rawProducts]);
 
   // 2.5 Lấy danh sách Product Aliases (Lưu vào RAM, làm mới mỗi 1 tiếng)
-  const { data: productAliases = [] } = useQuery({
+  const { data: rawProductAliases } = useQuery({
     queryKey: ['product_aliases'],
     queryFn: async () => {
       const { data, error } = await supabase.from('product_aliases').select('*');
@@ -213,8 +215,9 @@ export default function PGDashboard() {
     },
     staleTime: 1000 * 60 * 60, // 1 tiếng
   });
+  const productAliases = React.useMemo(() => rawProductAliases || [], [rawProductAliases]);
 
-  const { data: ocrErrors = [] } = useQuery({
+  const { data: rawOcrErrors } = useQuery({
     queryKey: ['ocr_errors'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -225,18 +228,85 @@ export default function PGDashboard() {
       return data;
     }
   });
+  const ocrErrors = React.useMemo(() => rawOcrErrors || [], [rawOcrErrors]);
 
-  // 3. Lấy Doanh số hôm nay (Từ SQL View)
-  const { data: todaySales = 0 } = useQuery({
+  // 3. Lấy Doanh số và KPI hôm nay
+  const { data: dashboardStats } = useQuery({
     queryKey: ['todaySales', user?.id],
     queryFn: async () => {
-      if (!user?.id) return 0;
-      const { data } = await supabase.from('v_pg_sales_summary')
-        .select('total_sales').eq('pg_id', user.id).eq('sale_date', todayStr).single();
-      return data?.total_sales || 0;
+      if (!user?.id) return { todaySales: 0, dailyKpiProgress: 0, monthlyKpiProgress: 0 };
+      
+      const dateObj = new Date();
+      // Ensure we are in local timezone for todayStr
+      const todayStr = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+      
+      const startOfM = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1).toISOString();
+      const endOfM = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
+      
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('order_details')
+        .select(`
+          net_value,
+          switched_from_brand,
+          orders!inner(created_at, pg_id)
+        `)
+        .eq('orders.pg_id', user.id)
+        .gte('orders.created_at', startOfM)
+        .lte('orders.created_at', endOfM);
+        
+      if (ordersError) {
+        console.error('Lỗi tải doanh số:', ordersError);
+        return { todaySales: 0, dailyKpiProgress: 0, monthlyKpiProgress: 0 };
+      }
+      
+      const startStr = startOfM.split('T')[0];
+      const endStr = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).toISOString().split('T')[0];
+      
+      const { data: kpiData } = await supabase
+        .from('kpis')
+        .select('*')
+        .eq('pg_id', user.id)
+        .gte('end_date', startStr)
+        .lte('start_date', endStr);
+        
+      let monthlyTotalAmount = 0;
+      let dailyTotalAmount = 0;
+      
+      ordersData?.forEach((item: any) => {
+        // Chỉ tính doanh số các món không phải quà tặng 
+        if (!item.switched_from_brand?.startsWith('QUÀ TẶNG:')) {
+          const o = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+          const val = Number(item.net_value) || 0;
+          monthlyTotalAmount += val;
+          
+          if (o?.created_at) {
+            const orderDateStr = new Date(new Date(o.created_at).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+            if (orderDateStr === todayStr) {
+              dailyTotalAmount += val;
+            }
+          }
+        }
+      });
+      
+      const totalMonthlyTarget = (kpiData || []).reduce((sum, kpi) => sum + Number(kpi.sale_target), 0);
+      const daysInMonth = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0).getDate();
+      const dailyTarget = totalMonthlyTarget / daysInMonth;
+      
+      const dailyKpiProgress = dailyTarget > 0 ? (dailyTotalAmount / dailyTarget) * 100 : 0;
+      const monthlyKpiProgress = totalMonthlyTarget > 0 ? (monthlyTotalAmount / totalMonthlyTarget) * 100 : 0;
+      
+      return { 
+        todaySales: dailyTotalAmount, 
+        dailyKpiProgress, 
+        monthlyKpiProgress 
+      };
     },
     enabled: !!user?.id,
   });
+
+  const todaySales = dashboardStats?.todaySales || 0;
+  const dailyKpiProgress = dashboardStats?.dailyKpiProgress || 0;
+  const monthlyKpiProgress = dashboardStats?.monthlyKpiProgress || 0;
 
   // 4 & 5. Lấy dữ liệu Khuyến mãi và Tồn kho
   const { data: promoAndInventoryData } = useQuery({
@@ -294,7 +364,7 @@ export default function PGDashboard() {
     enabled: !!selectedShopId && !!pgProfile?.manager_id && shops.length > 0,
   });
 
-  const activePromotions = promoAndInventoryData?.promotions || [];
+  const activePromotions = React.useMemo(() => promoAndInventoryData?.promotions || [], [promoAndInventoryData?.promotions]);
   const inventoryData = promoAndInventoryData?.inventory || [];
 
   // --- USE EFFECTS LÀM MƯỢT FORM ---
@@ -399,7 +469,8 @@ export default function PGDashboard() {
     if (selectedProductGroupName && availableProducts.length === 1 && !selectedProductId) {
       setSelectedProductId(availableProducts[0].product_id);
     }
-  }, [selectedProductGroupName, availableProducts, selectedProductId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProductGroupName, availableProducts.length, selectedProductId]);
 
   const addToCart = () => {
     const product = products.find(p => p.product_id === selectedProductId);
@@ -479,7 +550,7 @@ export default function PGDashboard() {
   // --- THUẬT TOÁN TÍNH KHUYẾN MÃI TỰ ĐỘNG ---
   useEffect(() => {
     if (cart.length === 0) {
-      setApplicableGifts([]);
+      setApplicableGifts(prev => prev.length === 0 ? prev : []);
       return;
     }
 
@@ -728,24 +799,35 @@ export default function PGDashboard() {
   return (
     <div className="space-y-6 max-w-lg mx-auto pb-10 px-4">
       <h2 className="text-2xl font-bold text-gray-900 pt-6">Bảng điều khiển PG</h2>
-      
-      {/* QUICK LINKS FOR PG */}
-      <div className="grid grid-cols-2 gap-3">
-        <Link to="/dashboard/report" className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-indigo-700 font-medium">
-          <FileText className="w-5 h-5" />
-          <span>Báo cáo ngày</span>
-        </Link>
-        <Link to="/dashboard/profile" className="flex items-center justify-center gap-2 p-3 bg-white border border-indigo-100 rounded-xl shadow-sm hover:bg-indigo-50 transition-colors text-indigo-700 font-medium">
-          <UserCircle className="w-5 h-5" />
-          <span>Hồ sơ cá nhân</span>
-        </Link>
-      </div>
 
       {/* WIDGET BÁO CÁO */}
-      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white">
-        <h3 className="text-sm font-medium text-indigo-100 mb-1">Doanh số Hôm nay</h3>
-        <div className="text-3xl font-extrabold text-yellow-300">
-          {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(todaySales)}
+      <div className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-2xl shadow-xl p-6 text-white space-y-4">
+        <div>
+          <h3 className="text-sm font-medium text-indigo-100 mb-1">Doanh số Hôm nay</h3>
+          <div className="text-3xl font-extrabold text-yellow-300">
+            {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(todaySales)}
+          </div>
+        </div>
+        
+        <div className="space-y-3 pt-4 border-t border-indigo-500/50">
+          <div>
+            <div className="flex justify-between text-xs text-indigo-100 mb-1.5 font-medium">
+              <span>Tiến độ Ngày</span>
+              <span>{dailyKpiProgress.toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-indigo-900/50 rounded-full h-2">
+              <div className="bg-green-400 h-2 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(74,222,128,0.4)]" style={{ width: `${Math.min(dailyKpiProgress, 100)}%` }}></div>
+            </div>
+          </div>
+          <div>
+            <div className="flex justify-between text-xs text-indigo-100 mb-1.5 font-medium">
+              <span>Tiến độ Tháng</span>
+              <span>{monthlyKpiProgress.toFixed(1)}%</span>
+            </div>
+            <div className="w-full bg-indigo-900/50 rounded-full h-2">
+              <div className="bg-yellow-400 h-2 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(250,204,21,0.4)]" style={{ width: `${Math.min(monthlyKpiProgress, 100)}%` }}></div>
+            </div>
+          </div>
         </div>
       </div>
 
