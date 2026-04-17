@@ -39,8 +39,9 @@ export default function Layout() {
     { name: 'Lịch bán hàng', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Hoạt động' },
     { name: 'Chỉ tiêu doanh số', href: '/dashboard/admin/kpis', icon: Target, category: 'Hoạt động' },
     { name: 'Nhập đơn hàng bán', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
-    { name: 'Báo cáo PG', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Báo cáo công việc', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
     { name: 'Báo cáo Chương trình', href: '/dashboard/admin/program-report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Hồ sơ cá nhân', href: '/dashboard/profile', icon: UserCircle, category: 'Cá nhân' },
   ];
 
   const supNavigation = [
@@ -50,8 +51,9 @@ export default function Layout() {
     { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Hoạt động' },
     { name: 'Phân công lịch làm việc', href: '/dashboard/admin/schedules', icon: Calendar, category: 'Hoạt động' },
     { name: 'Đơn hàng', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
-    { name: 'Báo cáo PG', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Báo cáo công việc', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
     { name: 'Báo cáo Chương trình', href: '/dashboard/admin/program-report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Hồ sơ cá nhân', href: '/dashboard/profile', icon: UserCircle, category: 'Cá nhân' },
   ];
 
   const pgNavigation = [

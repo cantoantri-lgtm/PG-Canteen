@@ -78,8 +78,8 @@ export default function App() {
             }
           >
             <Route index element={<DashboardRouter />} />
-            <Route path="profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-            <Route path="report" element={<ProtectedRoute><PGReport /></ProtectedRoute>} />
+            <Route path="profile" element={<Profile />} />
+            <Route path="report" element={<PGReport />} />
             <Route path="admin/program-report" element={<ProtectedRoute requireAdmin allowSup><ProgramReport /></ProtectedRoute>} />
             <Route path="admin/shops" element={<ProtectedRoute requireAdmin><Shops /></ProtectedRoute>} />
             <Route path="admin/shop-map" element={<ProtectedRoute requireAdmin><ShopMap /></ProtectedRoute>} />

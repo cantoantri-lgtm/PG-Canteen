@@ -403,7 +403,7 @@ export default function PGDashboard() {
   const addToCart = () => {
     const product = products.find(p => p.product_id === selectedProductId);
     const finalAmount = parseInt(customAmount.replace(/\./g, ''), 10);
-    if (!product || qty <= 0 || isNaN(finalAmount)) return;
+    if (!product || isNaN(qty) || qty <= 0 || isNaN(finalAmount)) return;
 
     setCart([...cart, { 
       product_id: product.product_id, 
@@ -753,7 +753,7 @@ export default function PGDashboard() {
               </span>
             ) : locationError ? (
               <span className="text-red-500">{locationError}</span>
-            ) : currentDistance !== null ? (
+            ) : currentDistance !== null && !isNaN(currentDistance) ? (
               <span className={`font-medium ${
                 currentDistance > (shops.find((s: any) => s.shop_id === selectedShopId)?.shops?.allowed_distance || 500) 
                   ? 'text-red-600' 
@@ -830,7 +830,7 @@ export default function PGDashboard() {
             {cart.map((item, idx) => (
               <li key={idx} className="flex justify-between items-center text-sm border-b border-gray-100 pb-3 last:border-0 last:pb-0">
                 <div className="flex flex-col pr-2">
-                  <span className="font-medium text-gray-800">{item.qty}x {item.product_group_name}</span>
+                  <span className="font-medium text-gray-800">{item.qty != null ? (isNaN(Number(item.qty)) ? 0 : item.qty) : 0}x {item.product_group_name}</span>
                   <span className="text-xs text-gray-500">{item.product_name}</span>
                   {item.switched_from_brand && <span className="text-[10px] text-green-700 bg-green-100 px-1.5 py-0.5 rounded w-fit mt-1">Đổi từ: {item.switched_from_brand}</span>}
                 </div>

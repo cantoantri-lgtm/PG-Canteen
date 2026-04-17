@@ -166,7 +166,7 @@ export default function PGReport() {
       : user?.full_name || 'Không xác định';
 
     // Lọc đơn hàng của đúng ngày được chọn
-    const dailyOrders = orders.filter(o => o.created_at.startsWith(selectedDate));
+    const dailyOrders = orders.filter(o => o.created_at?.startsWith(selectedDate));
     
     // Tính số giỏ hàng
     const uniqueCarts = new Set(dailyOrders.map(o => o.cart_id)).size;
@@ -180,8 +180,8 @@ export default function PGReport() {
       .reduce((sum, o) => sum + Number(o.net_value), 0);
 
     // Tính tỷ lệ chuyển đổi
-    const dailyTotalQty = dailyOrders.reduce((sum, o) => sum + Number(o.qty), 0);
-    const dailyConvertedQty = dailyOrders.filter(o => o.switched_from_brand).reduce((sum, o) => sum + Number(o.qty), 0);
+    const dailyTotalQty = dailyOrders.reduce((sum, o) => sum + Number(o.qty || 1), 0);
+    const dailyConvertedQty = dailyOrders.filter(o => o.switched_from_brand).reduce((sum, o) => sum + Number(o.qty || 1), 0);
     const conversionRate = dailyTotalQty > 0 ? (dailyConvertedQty / dailyTotalQty) * 100 : 0;
 
     // Tính toán KPI
@@ -207,8 +207,8 @@ export default function PGReport() {
       }
       
       const item = tableDataMap.get(key)!;
-      item.qty += Number(o.qty);
-      item.amount += Number(o.net_value);
+      item.qty += Number(o.qty || 1);
+      item.amount += Number(o.net_value || 0);
     });
 
     const tableData = Array.from(tableDataMap.values()).sort((a, b) => a.brand.localeCompare(b.brand) || a.product.localeCompare(b.product));

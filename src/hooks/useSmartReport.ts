@@ -3,26 +3,43 @@ import { format, subDays, startOfMonth, subMonths, eachDayOfInterval, endOfMonth
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 
-export function useSmartReport(masterData: any, isOpen: boolean = true, endDateStr?: string, isSup: boolean = false, userId?: string) {
-  let today = endDateStr ? new Date(endDateStr + 'T23:59:59.999') : new Date();
-  const actualToday = new Date();
-  if (today > actualToday) {
-    today = actualToday;
-  }
-  const yesterday = subDays(today, 1);
-  const startOfThisMonth = startOfMonth(today);
-  const startOfLastM = startOfMonth(subMonths(today, 1));
-  const sameDayLastMonth = subMonths(today, 1);
+export function useSmartReport(masterData: any, isOpen: boolean = true, appliedFilters?: any, isSup: boolean = false, userId?: string) {
+  // Determine the period based on appliedFilters
+  const { periodStart, periodEnd, prevPeriodStart, prevPeriodEnd } = useMemo(() => {
+    let end = appliedFilters?.endDate ? new Date(appliedFilters.endDate + 'T23:59:59.999') : new Date();
+    const actualToday = new Date();
+    if (end > actualToday) {
+      end = actualToday;
+    }
+    
+    let start = appliedFilters?.startDate ? new Date(appliedFilters.startDate + 'T00:00:00.000') : startOfMonth(end);
+    if (start > end) {
+      start = startOfMonth(end);
+    }
+    
+    // Calculate the previous period of the same length
+    const durationMs = end.getTime() - start.getTime();
+    const prevEnd = new Date(start.getTime() - 1);
+    const prevStart = new Date(prevEnd.getTime() - durationMs);
+
+    return { periodStart: start, periodEnd: end, prevPeriodStart: prevStart, prevPeriodEnd: prevEnd };
+  }, [appliedFilters]);
 
   const { data: orders, isLoading } = useQuery({
-    queryKey: ['smart_report_orders', today.toISOString().split('T')[0], isSup, userId],
+    queryKey: ['smart_report_orders', appliedFilters, userId, isSup],
     queryFn: async () => {
       let query = supabase
-        .from('orders')
-        .select('*, profiles!inner(manager_id)')
-        .gte('created_at', startOfLastM.toISOString())
-        .lte('created_at', today.toISOString());
-      
+        .from('order_details')
+        .select(`
+          *,
+          orders!inner(
+            created_at, pg_id, program_id, shop_id,
+            profiles!inner(manager_id)
+          )
+        `)
+        .gte('orders.created_at', prevPeriodStart.toISOString())
+        .lte('orders.created_at', periodEnd.toISOString());
+
       if (isSup && userId) {
         const { data: assignedPrograms } = await supabase
           .from('sup_programs')
@@ -31,17 +48,52 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
         const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
         
         if (assignedProgramIds.length > 0) {
-          query = query.in('program_id', assignedProgramIds);
+          query = query.in('orders.program_id', assignedProgramIds);
         } else {
           return [];
         }
         
-        query = query.eq('profiles.manager_id', userId);
+        query = query.eq('orders.profiles.manager_id', userId);
+      }
+
+      if (appliedFilters?.programId) {
+        query = query.eq('orders.program_id', appliedFilters.programId);
+      }
+      if (appliedFilters?.shopId) {
+        query = query.eq('orders.shop_id', appliedFilters.shopId);
+      }
+      if (appliedFilters?.brandId) {
+        const productIds = masterData?.products?.filter((p: any) => p.brand_id === appliedFilters.brandId).map((p: any) => p.product_id) || [];
+        if (productIds.length > 0) {
+          query = query.in('product_id', productIds);
+        } else {
+          return [];
+        }
+      }
+      if (appliedFilters?.productId) {
+        query = query.eq('product_id', appliedFilters.productId);
+      }
+      if (appliedFilters?.managerId) {
+        query = query.eq('orders.profiles.manager_id', appliedFilters.managerId);
       }
 
       const { data, error } = await query;
       if (error) throw error;
-      return data || [];
+      
+      // Flatten the data to match the expected structure in the report logic
+      return (data || []).map(item => {
+        const product = masterData?.products?.find((p: any) => p.product_id === item.product_id);
+        const brand_id = product?.brand_id;
+          
+        return {
+          ...item,
+          created_at: item.orders.created_at,
+          pg_id: item.orders.pg_id,
+          program_id: item.orders.program_id,
+          shop_id: item.orders.shop_id,
+          brand_id: brand_id
+        };
+      });
     },
     enabled: isOpen
   });
@@ -49,8 +101,8 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
   const report = useMemo(() => {
     if (!orders || !masterData) return null;
 
-    const todayStr = format(today, 'yyyy-MM-dd');
-    const yesterdayStr = format(yesterday, 'yyyy-MM-dd');
+    const todayStr = format(periodEnd, 'yyyy-MM-dd');
+    const yesterdayStr = format(subDays(periodEnd, 1), 'yyyy-MM-dd');
 
     let revToday = 0, revYesterday = 0, revThisMonth = 0, revLastMonthUpToToday = 0;
     const pgStats: Record<string, { id: string, name: string, today: number, yesterday: number, thisMonth: number, lastMonth: number }> = {};
@@ -69,8 +121,8 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
 
       const isToday = dateStr === todayStr;
       const isYesterday = dateStr === yesterdayStr;
-      const isThisMonth = orderDate >= startOfThisMonth;
-      const isLastMonthUpToToday = orderDate >= startOfLastM && orderDate <= sameDayLastMonth;
+      const isThisMonth = orderDate >= periodStart && orderDate <= periodEnd;
+      const isLastMonthUpToToday = orderDate >= prevPeriodStart && orderDate <= prevPeriodEnd;
 
       if (isToday) revToday += val;
       if (isYesterday) revYesterday += val;
@@ -145,7 +197,7 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
       diff: p.thisMonth - p.lastMonth,
       growthPct: calcGrowth(p.thisMonth, p.lastMonth)
     }));
-
+    
     const brandList = Object.values(brandStats).map(b => ({
       ...b,
       diff: b.thisMonth - b.lastMonth,
@@ -222,38 +274,72 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
 
     const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
 
-    const monthlyRecommendations: any[] = [];
-    const dailyRecommendations: any[] = [];
+    const dailyRecommendations: { title: string, problem: string, cause: string, solution: string }[] = [];
+    const monthlyRecommendations: { title: string, problem: string, cause: string, solution: string }[] = [];
 
-    const monthDays = eachDayOfInterval({ start: startOfThisMonth, end: endOfMonth(startOfThisMonth) });
+    // KPI Analysis
+    const monthDays = eachDayOfInterval({ start: startOfMonth(periodEnd), end: endOfMonth(periodEnd) });
     const workingDaysInMonth = monthDays.filter(d => !isSunday(d)).length || 1;
-    const daysUpToToday = eachDayOfInterval({ start: startOfThisMonth, end: today });
-    const workingDaysUpToToday = daysUpToToday.filter(d => !isSunday(d)).length || 1;
+    
+    const daysUpToToday = eachDayOfInterval({ start: periodStart, end: periodEnd });
+    const workingDaysUpToToday = daysUpToToday.filter(d => !isSunday(d)).length;
+
     const expectedMonthlyAchievement = (workingDaysUpToToday / workingDaysInMonth) * 100;
 
     const missedDailyPGs: any[] = [];
-    pgList.forEach(p => {
-      const kpi = (masterData.kpis || []).find((k: any) => k.pg_id === p.id)?.sale_target || 0;
-      if (kpi > 0) {
-        const dailyKpi = kpi / workingDaysInMonth;
-        if (p.today < dailyKpi && p.today > 0) {
-          missedDailyPGs.push({
-            ...p,
-            dailyKpi,
-            isMonthlyMissed: (p.thisMonth / kpi) * 100 < expectedMonthlyAchievement,
-            monthlyAchievement: (p.thisMonth / kpi) * 100
-          });
-        }
+
+    Object.values(pgStats).forEach(pg => {
+      const pgKpi = (masterData.kpis || []).find((k: any) => k.pg_id === pg.id)?.sale_target || 1;
+      const dailyKpi = Number(pgKpi) / workingDaysInMonth;
+      const monthlyKpi = Number(pgKpi);
+
+      const dailyAchievement = dailyKpi > 0 ? (pg.today / dailyKpi) * 100 : 0;
+      const monthlyAchievement = monthlyKpi > 0 ? (pg.thisMonth / monthlyKpi) * 100 : 0;
+      
+      const isDailyMissed = dailyAchievement < 100 && pg.today > 0; // Only count if they worked today but missed
+      const isMonthlyMissed = monthlyAchievement < expectedMonthlyAchievement;
+      
+      const improvedToday = pg.today > pg.yesterday;
+      const diffToday = pg.today - pg.yesterday;
+
+      if (isDailyMissed || isMonthlyMissed) {
+        missedDailyPGs.push({
+          ...pg,
+          dailyKpi,
+          monthlyKpi,
+          dailyAchievement,
+          monthlyAchievement,
+          isDailyMissed,
+          isMonthlyMissed,
+          improvedToday,
+          diffToday
+        });
       }
     });
 
-    if (missedDailyPGs.length > 0) {
-      const details = missedDailyPGs.slice(0, 3).map(p => `- ${p.name}: Đạt ${formatCurrency(p.today)} / ${formatCurrency(p.dailyKpi)} KPI ngày.`);
+    const missedDailyPGsOnly = missedDailyPGs.filter(p => p.isDailyMissed);
+    if (missedDailyPGsOnly.length > 0) {
+      const details = missedDailyPGsOnly.map(p => {
+        let trendStr = '';
+        if (p.diffToday > 0) {
+            const pct = p.yesterday > 0 ? (p.diffToday / p.yesterday) * 100 : 100;
+            trendStr = `Tăng ${formatCurrency(p.diffToday)} (${pct.toFixed(1)}%) so với ngày trước đó`;
+        } else if (p.diffToday < 0) {
+            const pct = p.yesterday > 0 ? (Math.abs(p.diffToday) / p.yesterday) * 100 : 100;
+            trendStr = `Giảm ${formatCurrency(Math.abs(p.diffToday))} (${pct.toFixed(1)}%) so với ngày trước đó`;
+        } else {
+            trendStr = `Đi ngang so với ngày trước đó`;
+        }
+
+        const dailyShortfall = p.dailyKpi - p.today;
+        return `- ${p.name}: Chậm KPI ngày ${formatCurrency(dailyShortfall > 0 ? dailyShortfall : 0)}. ${trendStr}.`;
+      });
+
       dailyRecommendations.push({
-        title: `Cảnh báo KPI Ngày: Các PG chưa đạt chỉ tiêu`,
-        problem: `Có ${missedDailyPGs.length} PG chưa đạt KPI trong ngày hôm nay.\n${details.join('\n')}`,
-        cause: `Có thể do lượng khách vắng, hoặc kỹ năng tiếp cận khách hàng chưa tốt trong ngày.`,
-        solution: `Cần động viên và theo dõi sát sao các PG này trong những ngày tới. Xem xét hỗ trợ thêm về kỹ năng tư vấn hoặc điều chỉnh vị trí đứng nếu cần.`
+        title: `Cảnh báo KPI Ngày: Các PG chưa đạt chỉ tiêu ngày cuối kỳ`,
+        problem: `Có ${missedDailyPGsOnly.length} PG đang chậm tiến độ KPI ngày.\n${details.join('\n')}`,
+        cause: `Nguyên nhân có thể do kỹ năng tiếp cận khách hàng chưa tốt, hoặc lượng khách tại điểm bán thấp.`,
+        solution: `Quản lý cần can thiệp ngay với các PG đang đi lùi/đi ngang. Phân tích nguyên nhân tại điểm bán và hỗ trợ trực tiếp.`
       });
     }
 
@@ -267,9 +353,9 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
       });
 
       monthlyRecommendations.push({
-        title: `Cảnh báo KPI Tháng: Các PG chưa đạt tiến độ chuẩn`,
-        problem: `Có ${missedMonthlyPGsOnly.length} PG đang chậm tiến độ KPI tháng.\n${details.join('\n')}`,
-        cause: `Tiến độ bán hàng chậm hơn so với thời gian đã trôi qua trong tháng.`,
+        title: `Cảnh báo KPI: Các PG chưa đạt tiến độ chuẩn`,
+        problem: `Có ${missedMonthlyPGsOnly.length} PG đang chậm tiến độ KPI.\n${details.join('\n')}`,
+        cause: `Tiến độ bán hàng chậm hơn so với thời gian đã trôi qua trong kỳ.`,
         solution: `Cần rà soát lại kế hoạch bán hàng của các PG này, tìm hiểu khó khăn và đưa ra phương án thúc đẩy doanh số trong các ngày còn lại.`
       });
     }
@@ -279,7 +365,7 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
         if (pg.worstBrandDiff < 0) {
           monthlyRecommendations.push({
             title: `Vấn đề của PG: ${pg.name}`,
-            problem: `Sụt giảm doanh số tổng thể ${formatCurrency(Math.abs(pg.diff))} so với tháng trước.`,
+            problem: `Sụt giảm doanh số tổng thể ${formatCurrency(Math.abs(pg.diff))} so với kỳ trước.`,
             cause: `Chủ yếu do sự sụt giảm mạnh ở nhóm hàng ${pg.worstBrandName} (giảm ${formatCurrency(Math.abs(pg.worstBrandDiff))}).`,
             solution: `Quản lý cần làm việc trực tiếp với ${pg.name} để kiểm tra kỹ năng tư vấn nhóm hàng ${pg.worstBrandName}. Cần xem xét lại cách trưng bày, tồn kho của nhóm hàng này tại căn tin PG đang làm việc và bổ sung kiến thức sản phẩm nếu cần.`
           });
@@ -292,186 +378,54 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, endDateS
         if (brand.worstProductDiff < 0) {
           monthlyRecommendations.push({
             title: `Vấn đề của Nhóm hàng: ${brand.name}`,
-            problem: `Sụt giảm doanh số toàn hệ thống ${formatCurrency(Math.abs(brand.diff))} so với tháng trước.`,
+            problem: `Sụt giảm doanh số toàn hệ thống ${formatCurrency(Math.abs(brand.diff))} so với kỳ trước.`,
             cause: `Doanh số bị kéo xuống chủ yếu bởi sản phẩm ${brand.worstProductName} (giảm ${formatCurrency(Math.abs(brand.worstProductDiff))}).`,
             solution: `Kiểm tra lại tình trạng đứt hàng, giá bán hoặc chương trình khuyến mãi của đối thủ đối với sản phẩm ${brand.worstProductName}. Cân nhắc đẩy mạnh sampling hoặc combo khuyến mãi riêng cho sản phẩm này để lấy lại đà tăng trưởng.`
           });
         }
       });
     } else {
+      // Fallback: if no brands are declining (e.g. first month), find the slowest selling brands
       const slowBrands = [...brandList].filter(b => b.thisMonth > 0).sort((a, b) => a.thisMonth - b.thisMonth).slice(0, 3);
-      
-      const detailedSlowBrands = slowBrands.map(brand => {
-        const productStatsForBrand = brandProductStats[brand.id] || {};
-        let lowestProductId = '';
-        let lowestProductSales = Infinity;
-        for (const [pId, stats] of Object.entries(productStatsForBrand)) {
-          if (stats.thisMonth > 0 && stats.thisMonth < lowestProductSales) {
-            lowestProductSales = stats.thisMonth;
-            lowestProductId = pId;
-          }
-        }
-        const lowestProductName = (masterData.products || []).find((p: any) => p.product_id === lowestProductId)?.product_name || 'Không xác định';
-
-        const pgStatsForBrand = brandPgStats[brand.id] || {};
-        let lowestPgId = '';
-        let lowestPgSales = Infinity;
-        for (const [pgId, stats] of Object.entries(pgStatsForBrand)) {
-          if (stats.thisMonth > 0 && stats.thisMonth < lowestPgSales) {
-            lowestPgSales = stats.thisMonth;
-            lowestPgId = pgId;
-          }
-        }
-        const lowestPgName = (masterData.profiles || []).find((p: any) => p.id === lowestPgId)?.full_name || 'Không xác định';
-
-        monthlyRecommendations.push({
-          title: `Lưu ý Nhóm hàng bán chậm: ${brand.name}`,
-          problem: `Nhóm hàng này đang có doanh số thấp nhất hệ thống trong tháng (${formatCurrency(brand.thisMonth)}).`,
-          cause: `Sản phẩm bán chậm nhất trong nhóm là ${lowestProductName} (${formatCurrency(lowestProductSales === Infinity ? 0 : lowestProductSales)}).`,
-          solution: `Cần tìm hiểu nguyên nhân (do giá, ít khuyến mãi, hay nhu cầu thấp). Cân nhắc các chương trình kích cầu hoặc đào tạo lại PG về cách tư vấn nhóm hàng này.`
-        });
-
-        return {
-          ...brand,
-          worstProductName: lowestProductName,
-          worstProductDiff: lowestProductSales === Infinity ? 0 : lowestProductSales,
-          worstPgName: lowestPgName,
-          worstPgDiff: lowestPgSales === Infinity ? 0 : lowestPgSales
-        };
-      });
-
-      (detailedDecliningBrands as any)._fallbackSlowBrands = detailedSlowBrands;
-    }
-
-    const pgListDaily = Object.values(pgStats).map(p => ({
-      ...p,
-      diff: p.today - p.yesterday,
-      growthPct: calcGrowth(p.today, p.yesterday)
-    }));
-    
-    const brandListDaily = Object.values(brandStats).map(b => ({
-      ...b,
-      diff: b.today - b.yesterday,
-      growthPct: calcGrowth(b.today, b.yesterday)
-    }));
-
-    const growingPGsDaily = [...pgListDaily].filter(p => p.diff > 0).sort((a, b) => b.diff - a.diff);
-    const decliningPGsDaily = [...pgListDaily].filter(p => p.diff < 0).sort((a, b) => a.diff - b.diff);
-
-    const growingBrandsDaily = [...brandListDaily].filter(b => b.diff > 0).sort((a, b) => b.diff - a.diff);
-    const decliningBrandsDaily = [...brandListDaily].filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
-
-    const decliningBrandsDailyOnly = [...brandListDaily].filter(b => b.diff < 0).sort((a, b) => a.diff - b.diff);
-    if (decliningBrandsDailyOnly.length > 0) {
-      const topDecliningDailyBrands = decliningBrandsDailyOnly.slice(0, 2);
-      topDecliningDailyBrands.forEach(brand => {
-        const pct = brand.yesterday > 0 ? (Math.abs(brand.diff) / brand.yesterday) * 100 : 100;
-        dailyRecommendations.push({
-          title: `Cảnh báo Nhóm hàng: ${brand.name}`,
-          problem: `Doanh số nhóm hàng ${brand.name} hôm nay giảm ${formatCurrency(Math.abs(brand.diff))} (${pct.toFixed(1)}%) so với hôm qua.`,
-          cause: `Có thể do thiếu hụt hàng hóa tại điểm bán, hoặc chương trình khuyến mãi kém hấp dẫn hơn đối thủ trong ngày hôm nay.`,
-          solution: `Kiểm tra ngay tồn kho của nhóm hàng ${brand.name} tại các căn tin. Nhắc nhở PG tập trung tư vấn và đẩy mạnh nhóm hàng này.`
-        });
-      });
-    }
-
-    if (revToday < revYesterday) {
-      const dropAmount = revYesterday - revToday;
-      const dropPercent = Math.abs(todayGrowth);
-      
-      let worstDailyPg: any = null;
-      let worstDailyDiff = 0;
-      
-      for (const pg of Object.values(pgStats)) {
-        const diff = pg.today - pg.yesterday;
-        if (diff < worstDailyDiff) {
-          worstDailyDiff = diff;
-          worstDailyPg = pg;
-        }
+      if (slowBrands.length > 0) {
+         monthlyRecommendations.push({
+            title: `Các nhóm hàng bán chậm`,
+            problem: `Nhóm hàng ${slowBrands.map(b => b.name).join(', ')} đang có doanh số thấp nhất toàn hệ thống.`,
+            cause: `Có thể do thiếu chương trình khuyến mãi hấp dẫn hoặc độ phủ tại các điểm bán chưa cao.`,
+            solution: `Cần rà soát lại độ phủ của các nhóm hàng này tại các shop. Xem xét tung ra các chương trình kích cầu hoặc combo dùng thử.`
+          });
       }
-
-      let worstPgText = '';
-      if (worstDailyPg) {
-        const pgDropPercent = worstDailyPg.yesterday > 0 
-          ? (Math.abs(worstDailyDiff) / worstDailyPg.yesterday) * 100 
-          : 100;
-        worstPgText = ` Nhân sự giảm mạnh nhất là ${worstDailyPg.name} (giảm ${formatCurrency(Math.abs(worstDailyDiff))}, tương đương ${pgDropPercent.toFixed(1)}%).`;
-      }
-
-      dailyRecommendations.push({
-        title: `Cảnh báo hệ thống: Doanh số ngày`,
-        problem: `Doanh số toàn hệ thống hôm nay giảm ${formatCurrency(dropAmount)} (${dropPercent.toFixed(1)}%) so với hôm qua.${worstPgText}`,
-        cause: `Lượng khách tiếp cận có thể thấp hơn hoặc tỉ lệ chuyển đổi giảm.`,
-        solution: `Nhắc nhở toàn bộ đội ngũ PG tăng cường hoạt động hoạt náo, chủ động tiếp cận khách hàng vào các khung giờ cao điểm. Đặc biệt cần hỗ trợ sát sao cho các PG đang có dấu hiệu đi lùi trong ngày.`
-      });
     }
 
-    if (dailyRecommendations.length === 0) {
-      dailyRecommendations.push({
-        title: `Đánh giá chung (Ngày)`,
-        problem: `Không có vấn đề nghiêm trọng.`,
-        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt so với hôm qua.`,
-        solution: `Tiếp tục duy trì các chiến lược hiện tại và khen thưởng các cá nhân xuất sắc.`
-      });
-    }
+    const dailyHighlights = [];
+    if (growingPGs.length > 0) dailyHighlights.push(`PG tăng trưởng tốt nhất: ${growingPGs[0].name} (+${formatCurrency(growingPGs[0].diff)})`);
+    if (growingBrands.length > 0) dailyHighlights.push(`Nhóm hàng tăng trưởng tốt nhất: ${growingBrands[0].name} (+${formatCurrency(growingBrands[0].diff)})`);
+    if (growingProducts.length > 0) dailyHighlights.push(`Sản phẩm bán chạy nhất: ${growingProducts[0].name} (+${formatCurrency(growingProducts[0].diff)})`);
 
-    if (monthlyRecommendations.length === 0) {
-      monthlyRecommendations.push({
-        title: `Đánh giá chung (Tháng)`,
-        problem: `Không có vấn đề nghiêm trọng.`,
-        cause: `Các chỉ số đang duy trì ổn định hoặc tăng trưởng tốt so với tháng trước.`,
-        solution: `Tiếp tục duy trì các chiến lược hiện tại và khen thưởng các cá nhân xuất sắc.`
-      });
-    }
-
-    const totalMonthlyKpi = (masterData.kpis || []).reduce((sum: number, k: any) => sum + Number(k.sale_target || 0), 0);
-    const expectedRevUpToToday = (workingDaysUpToToday / workingDaysInMonth) * totalMonthlyKpi;
-    const monthKpiPct = totalMonthlyKpi > 0 ? (revThisMonth / totalMonthlyKpi) * 100 : 0;
-    const monthExpectedPct = totalMonthlyKpi > 0 ? (expectedRevUpToToday / totalMonthlyKpi) * 100 : 0;
-
-    const dailyHighlights: string[] = [];
-    if (growingPGsDaily.length > 0) dailyHighlights.push(`PG nổi bật: ${growingPGsDaily[0].name} (+${formatCurrency(growingPGsDaily[0].diff)})`);
-    if (growingBrandsDaily.length > 0) dailyHighlights.push(`Nhóm hàng nổi bật: ${growingBrandsDaily[0].name} (+${formatCurrency(growingBrandsDaily[0].diff)})`);
-
-    const monthlyHighlights: string[] = [];
-    if (growingPGs.length > 0) monthlyHighlights.push(`PG xuất sắc: ${growingPGs[0].name} (+${formatCurrency(growingPGs[0].diff)})`);
-    if (growingBrands.length > 0) monthlyHighlights.push(`Nhóm hàng tăng trưởng mạnh: ${growingBrands[0].name} (+${formatCurrency(growingBrands[0].diff)})`);
-    if (growingProducts.length > 0) monthlyHighlights.push(`Sản phẩm đột phá: ${growingProducts[0].name} (+${formatCurrency(growingProducts[0].diff)})`);
-
-    const dailySummary = {
-      kpiText: `Doanh số hôm nay đạt ${formatCurrency(revToday)}. (Tiến độ tháng: đạt ${monthKpiPct.toFixed(1)}% / ${formatCurrency(totalMonthlyKpi)})`,
-      periodText: `So với hôm qua: ${todayGrowth > 0 ? 'Tăng' : todayGrowth < 0 ? 'Giảm' : 'Đi ngang'} ${formatCurrency(Math.abs(revToday - revYesterday))} (${Math.abs(todayGrowth).toFixed(1)}%)`,
-      highlights: dailyHighlights
-    };
-
-    const monthlySummary = {
-      kpiText: `Doanh số tháng này đạt ${formatCurrency(revThisMonth)} / ${formatCurrency(totalMonthlyKpi)} (${monthKpiPct.toFixed(1)}% KPI). Tiến độ chuẩn hiện tại là ${monthExpectedPct.toFixed(1)}% -> ${monthKpiPct >= monthExpectedPct ? 'Vượt/Đạt' : 'Chậm'} tiến độ.`,
-      periodText: `So với cùng kỳ tháng trước: ${monthGrowth > 0 ? 'Tăng' : monthGrowth < 0 ? 'Giảm' : 'Đi ngang'} ${formatCurrency(Math.abs(revThisMonth - revLastMonthUpToToday))} (${Math.abs(monthGrowth).toFixed(1)}%)`,
-      highlights: monthlyHighlights
-    };
+    const monthlyHighlights = [];
+    if (growingPGs.length > 0) monthlyHighlights.push(`PG tăng trưởng tốt nhất: ${growingPGs[0].name} (+${formatCurrency(growingPGs[0].diff)})`);
+    if (growingBrands.length > 0) monthlyHighlights.push(`Nhóm hàng tăng trưởng tốt nhất: ${growingBrands[0].name} (+${formatCurrency(growingBrands[0].diff)})`);
+    if (growingProducts.length > 0) monthlyHighlights.push(`Sản phẩm bán chạy nhất: ${growingProducts[0].name} (+${formatCurrency(growingProducts[0].diff)})`);
 
     return {
       daily: {
-        revCurrent: revToday, revPrevious: revYesterday, growth: todayGrowth,
-        growingPGs: growingPGsDaily, decliningPGs: decliningPGsDaily,
-        growingBrands: growingBrandsDaily, decliningBrands: decliningBrandsDaily,
-        growingProducts: [], decliningProducts: [],
-        recommendations: dailyRecommendations,
-        summary: dailySummary,
-        currentLabel: 'Hôm nay', previousLabel: 'Hôm qua'
+        summary: {
+          periodText: `Doanh số ngày ${format(periodEnd, 'dd/MM/yyyy')}: ${formatCurrency(revToday)} (So với ngày trước đó: ${todayGrowth > 0 ? '+' : ''}${todayGrowth.toFixed(1)}%)`,
+          kpiText: `Tiến độ KPI ngày: ${missedDailyPGsOnly.length === 0 ? 'Tất cả PG đạt chỉ tiêu' : `${missedDailyPGsOnly.length} PG chưa đạt chỉ tiêu`}`,
+          highlights: dailyHighlights
+        },
+        recommendations: dailyRecommendations
       },
       monthly: {
-        revCurrent: revThisMonth, revPrevious: revLastMonthUpToToday, growth: monthGrowth,
-        growingPGs, decliningPGs: detailedDecliningPGs,
-        growingBrands, decliningBrands: detailedDecliningBrands,
-        slowBrands: (detailedDecliningBrands as any)._fallbackSlowBrands || [],
-        growingProducts, decliningProducts,
-        recommendations: monthlyRecommendations,
-        summary: monthlySummary,
-        currentLabel: 'Tháng này', previousLabel: 'Cùng kỳ tháng trước'
+        summary: {
+          periodText: `Doanh số từ ${format(periodStart, 'dd/MM/yyyy')} đến ${format(periodEnd, 'dd/MM/yyyy')}: ${formatCurrency(revThisMonth)} (So với kỳ trước: ${monthGrowth > 0 ? '+' : ''}${monthGrowth.toFixed(1)}%)`,
+          kpiText: `Tiến độ KPI kỳ: ${missedMonthlyPGsOnly.length === 0 ? 'Tất cả PG đạt tiến độ chuẩn' : `${missedMonthlyPGsOnly.length} PG chậm tiến độ`}`,
+          highlights: monthlyHighlights
+        },
+        recommendations: monthlyRecommendations
       }
     };
-  }, [orders, masterData]);
+  }, [orders, masterData, periodStart, periodEnd, prevPeriodStart, prevPeriodEnd]);
 
   return { report, isLoading };
 }

@@ -8,6 +8,9 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 import { useAuth } from '../../lib/AuthContext';
+import * as XLSX from 'xlsx';
+import JSZip from 'jszip';
+import { saveAs } from 'file-saver';
 
 // --- CÁC INTERFACE DỮ LIỆU (Cập nhật theo cấu trúc mới) ---
 interface Order {
@@ -27,6 +30,7 @@ interface Order {
   distance_from_shop?: number | null;
   profiles?: { full_name: string };
   products?: { product_name: string; brand_id: string };
+  is_gift?: boolean;
 }
 
 interface Profile { id: string; full_name: string; }
@@ -51,6 +55,8 @@ export default function Orders() {
   const [selectedPgFilter, setSelectedPgFilter] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
   const [selectedProgramFilter, setSelectedProgramFilter] = useState('');
+  const [startDateFilter, setStartDateFilter] = useState('');
+  const [endDateFilter, setEndDateFilter] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 30;
   
@@ -87,7 +93,7 @@ export default function Orders() {
       let query = supabase
         .from('order_details')
         .select(`
-          id, order_id, product_id, qty, net_value, switched_from_brand,
+          id, order_id, product_id, qty, net_value, switched_from_brand, is_gift,
           orders!inner(
             cart_id, created_at, pg_id, program_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
             profiles!inner(full_name, manager_id)
@@ -131,6 +137,7 @@ export default function Orders() {
           qty: item.qty,
           net_value: item.net_value,
           switched_from_brand: item.switched_from_brand,
+          is_gift: item.is_gift,
           cart_id: order?.cart_id,
           created_at: order?.created_at,
           pg_id: order?.pg_id,
@@ -232,16 +239,66 @@ export default function Orders() {
       const matchesBrand = selectedBrandFilter === '' || o.products?.brand_id === selectedBrandFilter;
       const matchesProgram = selectedProgramFilter === '' || o.program_id === selectedProgramFilter;
       
-      return matchesSearch && matchesPg && matchesBrand && matchesProgram;
+      const orderDateStr = o.created_at ? o.created_at.substring(0, 10) : '';
+      const matchesStartDate = startDateFilter === '' || orderDateStr >= startDateFilter;
+      const matchesEndDate = endDateFilter === '' || orderDateStr <= endDateFilter;
+      
+      return matchesSearch && matchesPg && matchesBrand && matchesProgram && matchesStartDate && matchesEndDate;
     });
-  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter]);
+  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter, startDateFilter, endDateFilter]);
 
-  const totalPages = Math.ceil(filteredOrders.length / itemsPerPage);
-  const paginatedOrders = filteredOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  interface CartGroup {
+    cart_id: string;
+    order_id: string;
+    created_at: string;
+    pg_id: string;
+    program_id: string;
+    customer_name: string | null;
+    customer_phone: string | null;
+    bill_image_url: string | null;
+    distance_from_shop: number | null;
+    profiles: { full_name: string } | undefined;
+    total_amount: number;
+    items: Order[];
+  }
+
+  const groupedOrders = useMemo(() => {
+    const groups = new Map<string, CartGroup>();
+    filteredOrders.forEach(o => {
+      const cartId = o.cart_id;
+      if (!cartId) return;
+      if (!groups.has(cartId)) {
+        groups.set(cartId, {
+          cart_id: cartId,
+          order_id: o.order_id,
+          created_at: o.created_at,
+          pg_id: o.pg_id,
+          program_id: o.program_id,
+          customer_name: o.customer_name,
+          customer_phone: o.customer_phone,
+          bill_image_url: o.bill_image_url,
+          distance_from_shop: o.distance_from_shop,
+          profiles: o.profiles,
+          total_amount: 0,
+          items: []
+        });
+      }
+      const group = groups.get(cartId)!;
+      group.items.push(o);
+      group.total_amount += Number(o.net_value || 0);
+    });
+    return Array.from(groups.values());
+  }, [filteredOrders]);
+
+  const totalPages = Math.ceil(groupedOrders.length / itemsPerPage);
+  const paginatedGroups = groupedOrders.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  const [expandedCartId, setExpandedCartId] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter]);
+    setExpandedCartId(null);
+  }, [searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter, startDateFilter, endDateFilter]);
 
   // --- 3. MUTATIONS (THÊM / SỬA / XÓA) ---
   const saveMutation = useMutation({
@@ -480,38 +537,106 @@ export default function Orders() {
 
   const filteredProducts = products.filter(p => !selectedBrandId || p.brand_id === selectedBrandId);
 
-  // --- XUẤT CSV ---
-  const exportToCSV = () => {
-    if (!orders || orders.length === 0) {
+  const [isExportingImages, setIsExportingImages] = useState(false);
+
+  // --- XUẤT EXCEL ---
+  const exportToExcel = () => {
+    if (!filteredOrders || filteredOrders.length === 0) {
       toast.error('Không có dữ liệu để xuất');
       return;
     }
 
-    const headers = ['Mã Giỏ Hàng', 'Ngày tạo', 'Nhân viên PG', 'Sản phẩm', 'Số lượng', 'Thành tiền', 'Cướp từ đối thủ', 'Link hóa đơn'];
-    const rows = orders.map(order => [
-      order.cart_id,
-      new Date(order.created_at).toLocaleString('vi-VN'),
-      order.profiles?.full_name || 'N/A',
-      order.products?.product_name || 'N/A',
-      order.qty,
-      order.net_value,
-      order.switched_from_brand || 'Không',
-      order.bill_image_url || ''
-    ]);
+    const rows = filteredOrders.map(order => ({
+      'Mã Giỏ Hàng': order.cart_id,
+      'Ngày tạo': new Date(order.created_at).toLocaleString('vi-VN'),
+      'Nhân viên PG': order.profiles?.full_name || 'N/A',
+      'Sản phẩm': order.products?.product_name || 'N/A',
+      'Số lượng': order.qty,
+      'Thành tiền': order.net_value,
+      'Chương trình': programs.find(p => p.program_id === order.program_id)?.program_name || 'N/A',
+      'Cướp từ đối thủ': order.switched_from_brand || 'Không',
+      'Quà tặng': order.is_gift ? 'Có' : 'Không',
+      'Link hóa đơn': order.bill_image_url || ''
+    }));
 
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n');
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'DonHang');
 
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `bao_cao_chi_tiet_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const data = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(data, `bao_cao_chi_tiet_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // --- XUẤT ẢNH RA ZIP ---
+  const exportBillImagesZip = async () => {
+    if (!filteredOrders || filteredOrders.length === 0) {
+      toast.error('Không có dữ liệu để xuất ảnh');
+      return;
+    }
+
+    setIsExportingImages(true);
+    const toastId = toast.loading('Đang chuẩn bị tải và nén ảnh hóa đơn (Có thể mất vài phút)...');
+
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder("Bill_Images");
+      
+      // Lấy danh sách URL ảnh (unique)
+      const imageUrls = new Set<string>();
+      filteredOrders.forEach(o => {
+        if (o.bill_image_url) {
+            o.bill_image_url.split(',').forEach(url => {
+                if (url.trim()) imageUrls.add(url.trim());
+            });
+        }
+      });
+
+      if (imageUrls.size === 0) {
+        toast.dismiss(toastId);
+        toast.error('Không tìm thấy ảnh hóa đơn nào trong các đơn hàng hiện tại');
+        setIsExportingImages(false);
+        return;
+      }
+
+      toast.loading(`Đang tải ${imageUrls.size} ảnh...`, { id: toastId });
+
+      let downloadedCount = 0;
+      const downloadPromises = Array.from(imageUrls).map(async (url, index) => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+          const blob = await response.blob();
+          
+          let filename = `bill_${index + 1}.jpg`;
+          const urlParts = url.split('/');
+          const lastPart = urlParts[urlParts.length - 1];
+          if (lastPart && lastPart.includes('.')) {
+              const baseName = lastPart.split('?')[0];
+              filename = `bill_${index + 1}_${baseName}`;
+          }
+
+          folder?.file(filename, blob);
+          downloadedCount++;
+        } catch (err) {
+          console.error(`Lỗi tải ảnh: ${url}`, err);
+        }
+      });
+
+      await Promise.all(downloadPromises);
+
+      toast.loading(`Đang nén ${downloadedCount}/${imageUrls.size} ảnh...`, { id: toastId });
+      
+      const content = await zip.generateAsync({ type: 'blob' });
+      saveAs(content, `HoaDon_Bills_${new Date().toISOString().split('T')[0]}.zip`);
+      
+      toast.success(`Đã xuất thành công ${downloadedCount} ảnh`, { id: toastId });
+    } catch (error) {
+      console.error('Lỗi khi nén ZIP:', error);
+      toast.error('Có lỗi xảy ra khi nén thư mục', { id: toastId });
+    } finally {
+      setIsExportingImages(false);
+    }
   };
 
   if (loadingOrders) return <div className="p-8 text-center text-indigo-600 animate-pulse font-semibold">Đang tải dữ liệu...</div>;
@@ -520,10 +645,14 @@ export default function Orders() {
     <div className="space-y-6">
       <div className="sm:flex sm:items-center sm:justify-between">
         <h2 className="text-2xl font-bold text-gray-900">Quản lý Đơn hàng chi tiết</h2>
-        <div className="mt-3 sm:mt-0 flex space-x-3">
-          <button onClick={exportToCSV} className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50">
+        <div className="mt-3 sm:mt-0 flex flex-wrap gap-3">
+          <button onClick={exportBillImagesZip} disabled={isExportingImages} className="inline-flex items-center justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50">
             <Download className="-ml-1 mr-2 h-5 w-5 text-gray-400" />
-            Xuất CSV
+            {isExportingImages ? 'Đang nén ảnh...' : 'Xuất Ảnh (.zip)'}
+          </button>
+          <button onClick={exportToExcel} className="inline-flex items-center justify-center rounded-md border border-green-600 bg-green-50 px-4 py-2 text-sm font-medium text-green-700 shadow-sm hover:bg-green-100">
+            <Download className="-ml-1 mr-2 h-5 w-5 text-green-600" />
+            Xuất Excel
           </button>
           {isAdmin && (
             <button onClick={handleAdd} className="inline-flex items-center justify-center rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">
@@ -579,6 +708,24 @@ export default function Orders() {
             {brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
           </select>
         </div>
+        <div className="w-full sm:w-36">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Từ ngày</label>
+          <input
+            type="date"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={startDateFilter}
+            onChange={(e) => setStartDateFilter(e.target.value)}
+          />
+        </div>
+        <div className="w-full sm:w-36">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Đến ngày</label>
+          <input
+            type="date"
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={endDateFilter}
+            onChange={(e) => setEndDateFilter(e.target.value)}
+          />
+        </div>
         <div className="flex items-end">
           <button 
             onClick={() => {
@@ -586,6 +733,8 @@ export default function Orders() {
               setSelectedPgFilter('');
               setSelectedBrandFilter('');
               setSelectedProgramFilter('');
+              setStartDateFilter('');
+              setEndDateFilter('');
             }}
             className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-indigo-600 transition-colors"
           >
@@ -596,7 +745,7 @@ export default function Orders() {
 
       <div className="flex justify-between items-center px-1">
         <div className="text-sm text-gray-500">
-          Hiển thị <strong>{filteredOrders.length}</strong> / {orders.length} đơn hàng
+          Hiển thị <strong>{groupedOrders.length}</strong> giỏ hàng ({filteredOrders.length} sản phẩm)
           {ordersError && <span className="text-red-500 ml-2">(Lỗi: {(ordersError as any).message})</span>}
         </div>
       </div>
@@ -612,86 +761,113 @@ export default function Orders() {
                     <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Mã GH / Ngày tạo</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Nhân viên PG</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Khách hàng</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Sản phẩm</th>
-                    <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Số lượng</th>
-                    <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Thành tiền</th>
-                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Đổi từ hãng</th>
+                    <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Tổng tiền</th>
                     <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Hóa đơn</th>
-                    <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Khoảng cách</th>
                     <th className="relative py-3.5 pl-3 pr-4 sm:pr-6"><span className="sr-only">Thao tác</span></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
-                  {paginatedOrders.map((order) => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
-                        <div className="font-mono text-[10px] text-gray-400 uppercase">{order.cart_id}</div>
-                        <div className="text-gray-900">{new Date(order.created_at).toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-indigo-600">{order.profiles?.full_name || 'N/A'}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm">
-                        <div className="text-gray-900 font-medium">{order.customer_name || '-'}</div>
-                        <div className="text-gray-500 text-xs">{order.customer_phone || ''}</div>
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900">{order.products?.product_name || 'N/A'}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-900 text-right font-semibold">{order.qty}</td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-green-600 text-right font-semibold">
-                        {order.net_value.toLocaleString('vi-VN')} đ
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm">
-                        {order.switched_from_brand ? (
-                          <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${
-                            order.switched_from_brand.startsWith('QUÀ TẶNG') ? 'bg-pink-100 text-pink-800' : 
-                            order.switched_from_brand.startsWith('MẪU THỬ') ? 'bg-blue-100 text-blue-800' :
-                            'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {order.switched_from_brand}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
-                        {order.bill_image_url ? (
-                          <div className="flex items-center justify-center space-x-1">
-                            <img 
-                              src={order.bill_image_url.split(',')[0]} 
-                              alt="Bill" 
-                              className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
-                              referrerPolicy="no-referrer"
-                              onClick={() => handleViewBill(order.cart_id, order.bill_image_url)}
-                            />
-                            {order.bill_image_url.split(',').length > 1 && (
-                              <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
-                                +{order.bill_image_url.split(',').length - 1}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-4 text-sm text-right">
-                        {order.distance_from_shop != null ? (
-                          <span className={`font-medium ${order.distance_from_shop > 500 ? 'text-red-600' : 'text-gray-900'}`}>
-                            {Math.round(order.distance_from_shop)}m
-                          </span>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </td>
-                      <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                        <button onClick={() => handleViewBill(order.cart_id, order.bill_image_url)} className="text-blue-600 hover:text-blue-900 mr-4" title="Xem hóa đơn"><Eye className="h-4 w-4" /></button>
-                        {isAdmin && (
-                          <>
-                            <button onClick={() => handleEdit(order)} className="text-indigo-600 hover:text-indigo-900 mr-4"><Edit2 className="h-4 w-4" /></button>
-                            <button onClick={() => setDeleteId(order.id)} className="text-red-600 hover:text-red-900"><Trash2 className="h-4 w-4" /></button>
-                          </>
-                        )}
-                      </td>
-                    </tr>
+                  {paginatedGroups.map((group) => (
+                    <React.Fragment key={group.cart_id}>
+                      <tr className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedCartId(expandedCartId === group.cart_id ? null : group.cart_id)}>
+                        <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm">
+                          <div className="font-mono text-[10px] text-gray-400 uppercase">{group.cart_id}</div>
+                          <div className="text-gray-900">{new Date(group.created_at).toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-indigo-600">{group.profiles?.full_name || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm">
+                          <div className="text-gray-900 font-medium">{group.customer_name || '-'}</div>
+                          <div className="text-gray-500 text-xs">{group.customer_phone || ''}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-green-600 text-right font-semibold">
+                          {group.total_amount.toLocaleString('vi-VN')} đ
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm text-center">
+                          {group.bill_image_url ? (
+                            <div className="flex items-center justify-center space-x-1">
+                              <img 
+                                src={group.bill_image_url.split(',')[0]} 
+                                alt="Bill" 
+                                className="h-10 w-10 object-cover rounded border border-gray-200 cursor-pointer hover:opacity-80 transition-opacity"
+                                referrerPolicy="no-referrer"
+                                onClick={(e) => { e.stopPropagation(); handleViewBill(group.cart_id, group.bill_image_url); }}
+                              />
+                              {group.bill_image_url.split(',').length > 1 && (
+                                <span className="text-xs font-medium text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded-full">
+                                  +{group.bill_image_url.split(',').length - 1}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                        <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6 space-x-2">
+                          <button onClick={(e) => { e.stopPropagation(); handleViewBill(group.cart_id, group.bill_image_url); }} className="text-blue-600 hover:text-blue-900 mr-4" title="Xem hóa đơn"><Eye className="h-4 w-4" /></button>
+                          <button onClick={(e) => { e.stopPropagation(); setExpandedCartId(expandedCartId === group.cart_id ? null : group.cart_id); }} className="text-indigo-600 hover:text-indigo-900">
+                            {expandedCartId === group.cart_id ? 'Thu gọn' : 'Chi tiết'}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedCartId === group.cart_id && (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-4 bg-gray-50">
+                            <div className="rounded-lg border border-gray-200 bg-white overflow-hidden shadow-inner">
+                              <table className="min-w-full divide-y divide-gray-200">
+                                <thead className="bg-gray-100">
+                                  <tr>
+                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sản phẩm</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Số lượng</th>
+                                    <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Thành tiền</th>
+                                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Ghi chú / Khuyến mãi</th>
+                                    {isAdmin && <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Thao tác</th>}
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                  {group.items.map(item => (
+                                    <tr key={item.id} className={item.is_gift ? 'bg-pink-50/30' : ''}>
+                                      <td className="px-4 py-2 text-sm text-gray-900">
+                                        <div className="flex items-center">
+                                          {item.is_gift && <span className="mr-2 text-pink-500">🎁</span>}
+                                          {item.products?.product_name || 'N/A'}
+                                        </div>
+                                      </td>
+                                      <td className="px-4 py-2 text-sm text-gray-900 text-right">{item.qty != null ? (isNaN(Number(item.qty)) ? '-' : item.qty) : '-'}</td>
+                                      <td className="px-4 py-2 text-sm text-green-600 text-right font-medium">{item.net_value.toLocaleString('vi-VN')} đ</td>
+                                      <td className="px-4 py-2 text-sm">
+                                        {item.switched_from_brand ? (
+                                          <span className={`text-xs px-2 py-1 rounded font-bold uppercase ${
+                                            item.switched_from_brand.startsWith('QUÀ TẶNG') ? 'bg-pink-100 text-pink-800' : 
+                                            item.switched_from_brand.startsWith('MẪU THỬ') ? 'bg-blue-100 text-blue-800' :
+                                            'bg-yellow-100 text-yellow-800'
+                                          }`}>
+                                            {item.switched_from_brand}
+                                          </span>
+                                        ) : (
+                                          <span className="text-gray-400">-</span>
+                                        )}
+                                      </td>
+                                      {isAdmin && (
+                                        <td className="px-4 py-2 text-sm text-right space-x-2">
+                                          <button onClick={(e) => { e.stopPropagation(); handleEdit(item); }} className="text-indigo-600 hover:text-indigo-900 mr-2" title="Sửa">
+                                            <Edit2 className="w-4 h-4 inline" />
+                                          </button>
+                                          <button onClick={(e) => { e.stopPropagation(); setDeleteId(item.id); }} className="text-red-600 hover:text-red-900" title="Xóa">
+                                            <Trash2 className="w-4 h-4 inline" />
+                                          </button>
+                                        </td>
+                                      )}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   ))}
-                  {paginatedOrders.length === 0 && <tr><td colSpan={10} className="px-6 py-8 text-center text-gray-500">Không tìm thấy đơn hàng nào.</td></tr>}
+                  {paginatedGroups.length === 0 && <tr><td colSpan={6} className="px-6 py-8 text-center text-gray-500">Không tìm thấy giỏ hàng nào.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -702,6 +878,8 @@ export default function Orders() {
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={setCurrentPage}
+                  totalItems={groupedOrders.length}
+                  itemsPerPage={itemsPerPage}
                 />
               </div>
             )}

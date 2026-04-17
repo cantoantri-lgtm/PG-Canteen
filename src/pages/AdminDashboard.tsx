@@ -123,7 +123,7 @@ export default function AdminDashboard() {
     enabled: !authLoading
   });
 
-  const { report: smartReportData } = useSmartReport(masterData, !authLoading, appliedFilters.endDate, isSup, user?.id);
+  const { report: smartReportData } = useSmartReport(masterData, !authLoading, appliedFilters, isSup, user?.id);
 
   const { data: ordersData = [], isLoading: loadingOrders, error: ordersError } = useQuery({
     queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate, user?.id, isSup, authLoading],

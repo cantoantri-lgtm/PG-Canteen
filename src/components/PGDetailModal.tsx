@@ -74,8 +74,8 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
     const cartCount = new Set(pgOrders.map(o => o.cart_id)).size;
     const kpiAchievement = kpi > 0 ? (totalSales / kpi) * 100 : 0;
 
-    const totalQty = pgOrders.reduce((sum, o) => sum + Number(o.qty || 0), 0);
-    const convertedQty = pgOrders.filter(o => o.is_competitor_product).reduce((sum, o) => sum + Number(o.qty || 0), 0);
+    const totalQty = pgOrders.reduce((sum, o) => sum + Number(o.qty || 1), 0);
+    const convertedQty = pgOrders.filter(o => o.is_competitor_product).reduce((sum, o) => sum + Number(o.qty || 1), 0);
     const conversionRate = totalQty > 0 ? (convertedQty / totalQty) * 100 : 0;
 
     const brandMap: Record<string, number> = {};
@@ -105,7 +105,7 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
         customerName: o.customer_name,
         customerPhone: o.customer_phone,
         productName: product?.product_name || 'Không xác định',
-        qty: o.qty,
+        qty: o.qty != null ? o.qty : 1,
         amount: o.net_value,
         note: o.is_competitor_product ? `Từ: ${o.switched_from_brand || 'Đối thủ'}` : ''
       };

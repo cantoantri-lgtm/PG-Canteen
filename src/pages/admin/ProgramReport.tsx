@@ -121,8 +121,8 @@ export default function ProgramReport() {
       .filter(o => !o.switched_from_brand)
       .reduce((sum, o) => sum + Number(o.net_value), 0);
 
-    const dailyTotalQty = dailyOrders.reduce((sum, o) => sum + Number(o.qty), 0);
-    const dailyConvertedQty = dailyOrders.filter(o => o.switched_from_brand).reduce((sum, o) => sum + Number(o.qty), 0);
+    const dailyTotalQty = dailyOrders.reduce((sum, o) => sum + Number(o.qty || 1), 0);
+    const dailyConvertedQty = dailyOrders.filter(o => o.switched_from_brand).reduce((sum, o) => sum + Number(o.qty || 1), 0);
     const conversionRate = dailyTotalQty > 0 ? (dailyConvertedQty / dailyTotalQty) * 100 : 0;
 
     const tableDataMap = new Map<string, { brand: string, product: string, qty: number, amount: number }>();
@@ -137,8 +137,8 @@ export default function ProgramReport() {
       }
       
       const item = tableDataMap.get(key)!;
-      item.qty += Number(o.qty);
-      item.amount += Number(o.net_value);
+      item.qty += Number(o.qty || 1);
+      item.amount += Number(o.net_value || 0);
     });
 
     const tableData = Array.from(tableDataMap.values()).sort((a, b) => a.brand.localeCompare(b.brand) || a.product.localeCompare(b.product));

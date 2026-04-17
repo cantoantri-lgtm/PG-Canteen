@@ -284,6 +284,8 @@ export default function KPIs() {
                   currentPage={currentPage}
                   totalPages={totalPages}
                   onPageChange={setCurrentPage}
+                  totalItems={filteredKpis.length}
+                  itemsPerPage={itemsPerPage}
                 />
               </div>
             )}
