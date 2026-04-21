@@ -461,15 +461,16 @@ export default function Promotions() {
 
       <div className="space-y-4">
         {/* Header Row */}
-        <div className="grid grid-cols-12 px-6 py-3 text-sm font-semibold text-gray-500 border-b border-gray-100">
+        <div className="grid grid-cols-12 px-6 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100 bg-gray-50/50 rounded-t-xl">
+          <div className="col-span-1 text-center">STT</div>
           <div className="col-span-4">Tên chương trình</div>
-          <div className="col-span-3 text-center">Thời gian áp dụng</div>
+          <div className="col-span-2 text-center">Thời gian</div>
           <div className="col-span-2 text-center">Trạng thái</div>
           <div className="col-span-2 text-center">Số lượng Gói</div>
           <div className="col-span-1"></div>
         </div>
 
-        {paginatedPromotions.map((promotion) => {
+        {paginatedPromotions.map((promotion, pIdx) => {
           const isExpanded = expandedPromotionId === promotion.promotion_id;
           const now = new Date();
           const startDate = promotion.programs?.start_date ? new Date(promotion.programs.start_date) : null;
@@ -489,12 +490,12 @@ export default function Promotions() {
           return (
             <div key={promotion.promotion_id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
               <div 
-                className="grid grid-cols-12 px-6 py-5 items-center cursor-pointer hover:bg-gray-50 transition-colors"
+                className="grid grid-cols-12 px-6 py-4 items-center cursor-pointer hover:bg-gray-50 transition-colors"
                 onClick={() => setExpandedPromotionId(isExpanded ? null : promotion.promotion_id)}
               >
-                <div className="col-span-4 font-bold text-gray-900">{promotion.promotion_name}</div>
-                <div className="col-span-3 text-center text-sm text-gray-500 flex items-center justify-center">
-                  <RefreshCw className="h-4 w-4 mr-2 text-gray-300" />
+                <div className="col-span-1 text-center text-sm text-gray-400 font-medium">{(currentPage - 1) * itemsPerPage + pIdx + 1}</div>
+                <div className="col-span-4 font-bold text-gray-900 truncate pr-4">{promotion.promotion_name}</div>
+                <div className="col-span-2 text-center text-[11px] text-gray-500 font-medium">
                   {promotion.programs?.start_date ? new Date(promotion.programs.start_date).toLocaleDateString('vi-VN') : 'N/A'} - {promotion.programs?.end_date ? new Date(promotion.programs.end_date).toLocaleDateString('vi-VN') : 'N/A'}
                 </div>
                 <div className="col-span-2 text-center">
@@ -533,66 +534,76 @@ export default function Promotions() {
               {isExpanded && (
                 <div className="bg-gray-50/50 px-8 py-6 border-t border-gray-50">
                   <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Chi tiết các gói hỗ trợ</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {promotion.tiers?.map((tier, idx) => (
-                      <div key={idx} className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm relative overflow-hidden">
-                        <div className="flex justify-between items-start mb-4">
-                          <div className="flex flex-col items-start">
-                            <div className="flex items-center">
-                              {tier.tier_type === 'Quà tặng' && <Gift className="h-5 w-5 text-pink-500 mr-2 mt-0.5" />}
-                              <h5 className="font-bold text-blue-800">{tier.tier_name}</h5>
-                            </div>
-                            {/* HIỂN THỊ LABEL ON-TOP Ở CHẾ ĐỘ XEM */}
-                            {tier.is_ontop && (
-                              <span className="mt-2 inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-yellow-100 text-yellow-800 border border-yellow-200 uppercase tracking-wider">
-                                <Layers className="w-3 h-3 mr-1" /> Cộng dồn (On-top)
-                              </span>
-                            )}
-                          </div>
-                          {tier.support_amount > 0 && (
-                            <div className="text-right">
-                              <div className="text-green-600 font-bold text-lg">
-                                +{new Intl.NumberFormat('vi-VN').format(tier.support_amount)} đ/bộ
+                  <div className="overflow-x-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-center w-12">STT</th>
+                          <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-left">Tên Gói & Loại</th>
+                          <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Hỗ trợ / Gói</th>
+                          <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Doanh số Min</th>
+                          <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-left">Quà tặng & Điều kiện</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 bg-white">
+                        {[...(promotion.tiers || [])]
+                          .sort((a, b) => a.min_total_qty - b.min_total_qty)
+                          .map((tier, idx) => (
+                            <tr key={idx} className="hover:bg-indigo-50/30 transition-colors">
+                            <td className="px-4 py-3 text-center text-sm text-gray-400 font-medium">{idx + 1}</td>
+                            <td className="px-4 py-3">
+                              <div className="flex flex-col">
+                                <div className="flex items-center">
+                                  {tier.tier_type === 'Quà tặng' && <Gift className="h-4 w-4 text-pink-500 mr-2" />}
+                                  <span className="font-bold text-blue-800 text-sm">{tier.tier_name}</span>
+                                </div>
+                                <span className="text-[10px] text-gray-500 mt-0.5">{tier.tier_type}</span>
+                                {tier.is_ontop && (
+                                  <span className="mt-1 inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-yellow-100 text-yellow-800 border border-yellow-200 w-fit uppercase">
+                                    <Layers className="w-2.5 h-2.5 mr-1" /> On-top
+                                  </span>
+                                )}
                               </div>
-                            </div>
-                          )}
-                        </div>
-                        
-                        <div className="space-y-2 text-sm">
-                          <div className="text-gray-500">
-                            Loại: {tier.tier_type}
-                          </div>
-                          {tier.tier_type === 'Quà tặng' && (tier.gifts && tier.gifts.length > 0 ? tier.gifts : [{ gift_product_id: tier.gift_product_id, gift_quantity: tier.gift_quantity || 1, product_name: (tier.products as any)?.product_name }]).map((gift, gIdx) => gift.product_name && (
-                            <div key={gIdx} className="text-pink-700 font-bold flex items-center bg-pink-50 px-3 py-2 rounded-lg border border-pink-100 mt-2">
-                              <Gift className="h-4 w-4 mr-2 text-pink-500" />
-                              <span className="text-xs uppercase tracking-wider mr-2">Quà tặng:</span>
-                              <span className="text-lg mr-1">{gift.gift_quantity || 1}x</span> {gift.product_name}
-                            </div>
-                          ))}
-                          <div className="text-gray-700 mt-3 bg-blue-50 p-2 rounded border border-blue-100">
-                            <span className="text-xs uppercase text-blue-600 font-bold mr-2">Tổng số tiền tối thiểu:</span> 
-                            <span className="font-bold text-blue-800 text-lg">{new Intl.NumberFormat('vi-VN').format(tier.min_total_qty)} đ</span>
-                          </div>
-                          
-                          {tier.conditions && tier.conditions.length > 0 && tier.conditions.some(c => c.target_values && c.target_values.length > 0) && (
-                            <div className="mt-4 pt-4 border-t border-gray-50">
-                              <div className="font-bold text-gray-800 mb-2 bg-gray-100 inline-block px-2 py-1 rounded text-xs uppercase tracking-wider">Điều kiện áp dụng:</div>
-                              <ul className="space-y-2 mt-2">
-                                {tier.conditions.filter(c => c.target_values && c.target_values.length > 0).map((cond, cIdx) => (
-                                  <li key={cIdx} className="flex items-start text-gray-800 font-medium bg-gray-50 p-2 rounded border border-gray-100">
-                                    <span className="mr-2 mt-1.5 w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></span>
-                                    <span>
-                                      <span className="text-blue-700">{cond.condition_type}:</span> {Array.isArray(cond.target_values) ? cond.target_values.join(', ') : cond.target_values} 
-                                      <span className="text-gray-500 ml-1 text-xs font-normal">(Tối thiểu {cond.min_target_value} bộ)</span>
-                                    </span>
-                                  </li>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              {tier.support_amount > 0 ? (
+                                <span className="text-green-600 font-bold text-sm">
+                                  +{new Intl.NumberFormat('vi-VN').format(tier.support_amount)} đ
+                                </span>
+                              ) : (
+                                <span className="text-gray-300 text-xs">-</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-blue-700 text-sm">
+                              {new Intl.NumberFormat('vi-VN').format(tier.min_total_qty)} đ
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="space-y-2 max-w-sm">
+                                {/* Gifts */}
+                                {tier.tier_type === 'Quà tặng' && (tier.gifts && tier.gifts.length > 0 ? tier.gifts : [{ gift_product_id: tier.gift_product_id, gift_quantity: tier.gift_quantity || 1, product_name: (tier.products as any)?.product_name }]).map((gift, gIdx) => gift.product_name && (
+                                  <div key={gIdx} className="text-[11px] text-pink-700 font-bold flex items-center bg-pink-50 px-2 py-1 rounded border border-pink-100">
+                                    <span className="mr-1">{gift.gift_quantity || 1}x</span> {gift.product_name}
+                                  </div>
                                 ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                                
+                                {/* Conditions */}
+                                {tier.conditions && tier.conditions.length > 0 && tier.conditions.some(c => c.target_values && c.target_values.length > 0) && (
+                                  <div className="flex flex-wrap gap-1">
+                                    {tier.conditions.filter(c => c.target_values && c.target_values.length > 0).map((cond, cIdx) => (
+                                      <div key={cIdx} className="text-[10px] bg-gray-100 text-gray-700 px-2 py-1 rounded border border-gray-200 font-medium">
+                                        <span className="text-indigo-600 font-bold mr-1">{cond.condition_type}:</span>
+                                        {Array.isArray(cond.target_values) ? cond.target_values.join(', ') : cond.target_values}
+                                        <span className="text-gray-400 ml-1">(Min {cond.min_target_value} bộ)</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
