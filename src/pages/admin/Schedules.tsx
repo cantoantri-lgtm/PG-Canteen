@@ -311,44 +311,63 @@ export default function Schedules() {
                 {isExpanded && (
                   <div className="p-5 bg-gray-50 border-t border-gray-100">
                     <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Chi tiết phân bổ</h4>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {group.schedules.map(schedule => (
-                        <div key={schedule.schedule_id} className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm hover:border-indigo-300 transition-colors flex flex-col justify-between">
-                          {/* Thông tin thẻ */}
-                          <div>
-                            <div className="flex items-center gap-2 mb-3">
-                              <User className="w-4 h-4 text-indigo-500" />
-                              <span className="font-bold text-gray-900 text-sm">{schedule.profiles?.full_name}</span>
-                            </div>
-                            <div className="space-y-2 text-sm text-gray-600">
-                              <div className="flex items-start gap-2">
-                                <MapPin className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
-                                <span className="line-clamp-2">{schedule.shops?.shop_name}</span>
-                              </div>
-                              <div className="flex items-center gap-2 bg-gray-50 w-fit px-2 py-1 rounded text-xs">
-                                <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                                {safeFormatDate(schedule.start_date, 'dd/MM')} ➔ {safeFormatDate(schedule.end_date, 'dd/MM')}
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* NÚT THAO TÁC RÕ RÀNG */}
-                          <div className="mt-4 pt-3 border-t border-gray-100 flex justify-end gap-2">
-                            <button 
-                              onClick={() => { setIsAdding(false); setEditForm(schedule); setIsModalOpen(true); }} 
-                              className="flex items-center gap-1 text-xs font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              <Edit2 className="w-3.5 h-3.5"/> Sửa
-                            </button>
-                            <button 
-                              onClick={() => setDeleteId(schedule.schedule_id)} 
-                              className="flex items-center gap-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors"
-                            >
-                              <Trash2 className="w-3.5 h-3.5"/> Xóa
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="overflow-x-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+                      <table className="min-w-full divide-y divide-gray-200 text-left">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-center w-12">STT</th>
+                            <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Nhân viên PG</th>
+                            <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Cửa hàng</th>
+                            <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider">Thời gian</th>
+                            <th className="px-4 py-3 text-xs font-bold text-gray-500 uppercase tracking-wider text-right">Thao tác</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white">
+                          {group.schedules.map((schedule, idx) => (
+                            <tr key={schedule.schedule_id} className="hover:bg-indigo-50/30 transition-colors">
+                              <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-400 text-center font-medium">{idx + 1}</td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-full bg-indigo-100 flex items-center justify-center text-[10px] text-indigo-700 font-bold shrink-0">
+                                    {schedule.profiles?.full_name?.charAt(0)}
+                                  </div>
+                                  <span className="font-bold text-gray-900 text-sm">{schedule.profiles?.full_name}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <div className="flex items-start gap-2 max-w-[250px]">
+                                  <MapPin className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
+                                  <span className="text-sm text-gray-600 truncate">{schedule.shops?.shop_name}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <div className="flex items-center gap-2 text-xs text-gray-600 font-medium">
+                                  <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                                  {safeFormatDate(schedule.start_date, 'dd/MM')} ➔ {safeFormatDate(schedule.end_date, 'dd/MM')}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap text-right">
+                                <div className="flex justify-end gap-2">
+                                  <button 
+                                    onClick={() => { setIsAdding(false); setEditForm(schedule); setIsModalOpen(true); }} 
+                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-transparent hover:border-blue-100"
+                                    title="Sửa"
+                                  >
+                                    <Edit2 className="w-4 h-4"/>
+                                  </button>
+                                  <button 
+                                    onClick={() => setDeleteId(schedule.schedule_id)} 
+                                    className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-transparent hover:border-red-100"
+                                    title="Xóa"
+                                  >
+                                    <Trash2 className="w-4 h-4"/>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )}

@@ -407,6 +407,16 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, appliedF
     if (growingBrands.length > 0) monthlyHighlights.push(`Nhóm hàng tăng trưởng tốt nhất: ${growingBrands[0].name} (+${formatCurrency(growingBrands[0].diff)})`);
     if (growingProducts.length > 0) monthlyHighlights.push(`Sản phẩm bán chạy nhất: ${growingProducts[0].name} (+${formatCurrency(growingProducts[0].diff)})`);
 
+    const problematicPgIds = Array.from(new Set([
+      ...missedDailyPGs.filter(p => p.isDailyMissed || p.isMonthlyMissed).map(p => p.id),
+      ...detailedDecliningPGs.map(p => p.id)
+    ]));
+
+    const problematicBrandIds = Array.from(new Set([
+      ...detailedDecliningBrands.map(b => b.id),
+      ...((brandList.filter(b => b.thisMonth > 0).sort((a,b) => a.thisMonth - b.thisMonth).slice(0, 3)).map(b => b.id))
+    ]));
+
     return {
       daily: {
         summary: {
@@ -414,7 +424,9 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, appliedF
           kpiText: `Tiến độ KPI ngày: ${missedDailyPGsOnly.length === 0 ? 'Tất cả PG đạt chỉ tiêu' : `${missedDailyPGsOnly.length} PG chưa đạt chỉ tiêu`}`,
           highlights: dailyHighlights
         },
-        recommendations: dailyRecommendations
+        recommendations: dailyRecommendations,
+        problematicPgIds,
+        problematicBrandIds
       },
       monthly: {
         summary: {
@@ -422,8 +434,11 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, appliedF
           kpiText: `Tiến độ KPI kỳ: ${missedMonthlyPGsOnly.length === 0 ? 'Tất cả PG đạt tiến độ chuẩn' : `${missedMonthlyPGsOnly.length} PG chậm tiến độ`}`,
           highlights: monthlyHighlights
         },
-        recommendations: monthlyRecommendations
-      }
+        recommendations: monthlyRecommendations,
+        problematicPgIds,
+        problematicBrandIds
+      },
+      orders // Include raw orders for chart generation
     };
   }, [orders, masterData, periodStart, periodEnd, prevPeriodStart, prevPeriodEnd]);
 

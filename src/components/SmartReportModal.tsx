@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
-import { X, Sparkles, TrendingUp, TrendingDown, AlertCircle, Lightbulb, Calendar, BarChart3, Target, Award } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { X, Sparkles, AlertCircle, Lightbulb, Calendar, BarChart3, Target, Award, LineChart as ChartIcon } from 'lucide-react';
 import { useAuth } from '../lib/AuthContext';
 import { useSmartReport } from '../hooks/useSmartReport';
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
+} from 'recharts';
+import { format, parseISO } from 'date-fns';
 
 interface SmartReportModalProps {
   isOpen: boolean;
@@ -16,10 +20,99 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr, appl
   const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
 
   const [activeTab, setActiveTab] = useState<'daily' | 'monthly'>('monthly'); // Default to period view
+  const [selectedEntityId, setSelectedEntityId] = useState<{ id: string, name: string, type: 'pg' | 'brand' } | null>(null);
 
   const { report, isLoading } = useSmartReport(masterData, isOpen, appliedFilters, isSup, user?.id);
 
+  const chartData = useMemo(() => {
+    if (!selectedEntityId || !report?.orders) return [];
+
+    const orders = report.orders as any[];
+    const filtered = selectedEntityId.type === 'pg' 
+      ? orders.filter(o => o.pg_id === selectedEntityId.id)
+      : orders.filter(o => o.brand_id === selectedEntityId.id);
+
+    const dailyMap: Record<string, number> = {};
+    filtered.forEach(o => {
+      const date = format(parseISO(o.created_at), 'dd/MM');
+      dailyMap[date] = (dailyMap[date] || 0) + Number(o.net_value || 0);
+    });
+
+    return Object.entries(dailyMap)
+      .map(([date, sales]) => ({ date, sales }))
+      .sort((a, b) => {
+        const [da, ma] = a.date.split('/').map(Number);
+        const [db, mb] = b.date.split('/').map(Number);
+        return ma !== mb ? ma - mb : da - db;
+      });
+  }, [selectedEntityId, report?.orders]);
+
   if (!isOpen) return null;
+
+  const highlightText = (text: string, pgIds: string[], brandIds: string[]) => {
+    if (!text) return null;
+
+    let parts: { text: string, id: string | null, type: 'pg' | 'brand' | null }[] = [{ text, id: null, type: null }];
+
+    // Highlight PGs
+    pgIds.forEach(id => {
+      const name = masterData.profiles.find((p: any) => p.id === id)?.full_name;
+      if (name) {
+        let newParts: typeof parts = [];
+        parts.forEach(p => {
+          if (p.id) {
+            newParts.push(p);
+            return;
+          }
+          const subParts = p.text.split(name);
+          subParts.forEach((sp, i) => {
+            newParts.push({ text: sp, id: null, type: null });
+            if (i < subParts.length - 1) {
+              newParts.push({ text: name, id, type: 'pg' });
+            }
+          });
+        });
+        parts = newParts;
+      }
+    });
+
+    // Highlight Brands
+    brandIds.forEach(id => {
+      const name = masterData.brands.find((b: any) => b.brand_id === id)?.brand_name;
+      if (name) {
+        let newParts: typeof parts = [];
+        parts.forEach(p => {
+          if (p.id) {
+            newParts.push(p);
+            return;
+          }
+          const subParts = p.text.split(name);
+          subParts.forEach((sp, i) => {
+            newParts.push({ text: sp, id: null, type: null });
+            if (i < subParts.length - 1) {
+              newParts.push({ text: name, id, type: 'brand' });
+            }
+          });
+        });
+        parts = newParts;
+      }
+    });
+
+    return parts.map((p, i) => {
+      if (p.id) {
+        return (
+          <button
+            key={i}
+            onClick={() => setSelectedEntityId({ id: p.id!, name: p.text, type: p.type! })}
+            className="text-purple-600 font-bold hover:underline decoration-2 underline-offset-2 transition-all hover:text-purple-800"
+          >
+            {p.text}
+          </button>
+        );
+      }
+      return <span key={i}>{p.text}</span>;
+    });
+  };
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -144,19 +237,10 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr, appl
                           <div className="space-y-3 flex-1">
                             <h4 className="text-base font-bold text-gray-900">{rec.title}</h4>
                             
-                            <div className="bg-gray-50 rounded-lg p-3 text-sm text-gray-700 border border-gray-100">
-                              <span className="font-semibold text-gray-900 block mb-1">Vấn đề:</span>
-                              <div className="whitespace-pre-line">{rec.problem}</div>
-                            </div>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div className="text-sm">
-                                <span className="font-semibold text-gray-900 block mb-1">Nguyên nhân dự kiến:</span>
-                                <p className="text-gray-600">{rec.cause}</p>
-                              </div>
-                              <div className="text-sm">
-                                <span className="font-semibold text-purple-700 block mb-1">Giải pháp đề xuất:</span>
-                                <p className="text-purple-600">{rec.solution}</p>
+                            <div className="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 border border-gray-100 leading-relaxed">
+                              <span className="font-bold text-gray-900 block mb-2 underline decoration-red-200 decoration-4">Cảnh báo vấn đề:</span>
+                              <div className="whitespace-pre-line">
+                                {highlightText(rec.problem, report[activeTab].problematicPgIds, report[activeTab].problematicBrandIds)}
                               </div>
                             </div>
                           </div>
@@ -170,6 +254,82 @@ export function SmartReportModal({ isOpen, onClose, masterData, endDateStr, appl
           )}
         </div>
       </div>
+
+      {/* Sales Chart Modal Overlay */}
+      {selectedEntityId && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] flex items-center justify-center z-[60] p-4 transition-all animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-purple-700 p-4 flex justify-between items-center">
+              <div className="flex items-center space-x-2 text-white">
+                <ChartIcon className="w-5 h-5 text-purple-200" />
+                <h3 className="font-bold">Biểu đồ doanh số: <span className="text-yellow-300">{selectedEntityId.name}</span></h3>
+              </div>
+              <button 
+                onClick={() => setSelectedEntityId(null)}
+                className="text-white/80 hover:text-white p-1 hover:bg-white/10 rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <div className="h-64 w-full">
+                {chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={chartData}>
+                      <defs>
+                        <linearGradient id="colorSales" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.1}/>
+                          <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                      <XAxis 
+                        dataKey="date" 
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 11, fill: '#9ca3af' }}
+                      />
+                      <YAxis 
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 11, fill: '#9ca3af' }}
+                        tickFormatter={(val) => `${(val / 1000000).toFixed(1)}M`}
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                        formatter={(value: number) => [new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(value), 'Doanh số']}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="sales" 
+                        stroke="#8b5cf6" 
+                        strokeWidth={3}
+                        fillOpacity={1} 
+                        fill="url(#colorSales)" 
+                        animationDuration={1000}
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-gray-500 font-medium">
+                    Không có dữ liệu chi tiết cho thời kỳ này.
+                  </div>
+                )}
+              </div>
+              
+              <div className="mt-6 flex justify-end">
+                <button 
+                  onClick={() => setSelectedEntityId(null)}
+                  className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-xl transition-colors"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
