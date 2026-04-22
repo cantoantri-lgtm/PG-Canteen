@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Link } from 'react-router-dom';
-import { Camera, Check, X, FileText, UserCircle, Gift, BarChart3 } from 'lucide-react';
+import { Camera, Check, X, FileText, UserCircle, Gift, BarChart3, Plus, Minus } from 'lucide-react';
 import clsx from 'clsx';
 import { matchProduct, learnAlias, logOcrError } from '../services/ocrLearningService';
 import Scanbill from '../components/Scanbill';
@@ -919,11 +919,35 @@ export default function PGDashboard() {
         </div>
 
         <div className="flex gap-2 items-end">
-          <div className="w-20">
-            <label className="text-xs text-gray-400">SL</label>
-            <input type="number" min="1" className="w-full p-2.5 border rounded-xl text-center" value={qty} onChange={e => setQty(parseInt(e.target.value)||1)} />
-          </div>
           <div className="flex-1">
+            <label className="text-xs text-gray-400">Số lượng</label>
+            <div className="flex items-center">
+              <button 
+                type="button"
+                onClick={() => setQty(Math.max(1, qty - 1))}
+                className="p-2.5 bg-gray-50 border border-gray-200 rounded-l-xl hover:bg-gray-100 transition-colors"
+                title="Giảm số lượng"
+              >
+                <Minus className="w-4 h-4 text-gray-500" />
+              </button>
+              <input 
+                type="number" 
+                min="1" 
+                className="w-full p-2.5 border-t border-b border-gray-200 text-center font-bold focus:outline-none" 
+                value={qty} 
+                onChange={e => setQty(parseInt(e.target.value)||1)} 
+              />
+              <button 
+                type="button"
+                onClick={() => setQty(qty + 1)}
+                className="p-2.5 bg-gray-50 border border-gray-200 rounded-r-xl hover:bg-gray-100 transition-colors"
+                title="Tăng số lượng"
+              >
+                <Plus className="w-4 h-4 text-gray-500" />
+              </button>
+            </div>
+          </div>
+          <div className="flex-[1.5]">
             <label className="text-xs text-gray-400">Số tiền (đ)</label>
             <input type="text" className="w-full p-2.5 border rounded-xl text-right font-bold text-indigo-700 bg-indigo-50" value={customAmount} onChange={e => setCustomAmount(formatNumber(e.target.value))} />
           </div>
