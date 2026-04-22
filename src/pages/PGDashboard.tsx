@@ -5,7 +5,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Link } from 'react-router-dom';
-import { Camera, Check, X, FileText, UserCircle } from 'lucide-react';
+import { Camera, Check, X, FileText, UserCircle, Gift, BarChart3 } from 'lucide-react';
+import clsx from 'clsx';
 import { matchProduct, learnAlias, logOcrError } from '../services/ocrLearningService';
 import Scanbill from '../components/Scanbill';
 
@@ -63,6 +64,9 @@ export default function PGDashboard() {
   const [locationError, setLocationError] = useState<string | null>(null);
 
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [eligibleTiers, setEligibleTiers] = useState<any[]>([]);
+  const [selectedTierKeys, setSelectedTierKeys] = useState<string[]>([]);
+  const [isManualGiftMode, setIsManualGiftMode] = useState(false);
   const [applicableGifts, setApplicableGifts] = useState<any[]>([]);
   
   // State cho thông tin khách hàng & Bill
@@ -626,28 +630,55 @@ export default function PGDashboard() {
 
     const sortedGroupedTiers = Object.values(groupedNormalTiers).sort((a: any, b: any) => b.min_total_qty - a.min_total_qty);
 
-    let remainingAmount = cartTotal;
-    let finalNormalGifts: any[] = [];
+    // 1. Lưu lại danh sách các mốc "Đủ điều kiện" để PG chọn/hệ thống đề xuất
+    const eligibleNormalTiers = sortedGroupedTiers.filter((group: any) => group.min_total_qty > 0 && group.min_total_qty <= cartTotal);
+    setEligibleTiers(eligibleNormalTiers);
 
-    // Tính toán quà tặng dựa trên số tiền còn lại (Greedy algorithm)
-    for (const group of sortedGroupedTiers) {
-      if (group.min_total_qty <= 0) continue;
+    // 2. Logic đề xuất tự động (Greedy) nếu chưa bật chế độ thủ công
+    if (!isManualGiftMode) {
+      let remainingAmount = cartTotal;
+      let suggestedKeys: string[] = [];
+      const greedyTiers = [...eligibleNormalTiers].sort((a: any, b: any) => b.min_total_qty - a.min_total_qty);
       
-      while (remainingAmount >= group.min_total_qty) {
-        // Thêm tất cả quà tặng của mốc này
-        group.gifts.forEach((gift: any) => {
-          const existingGift = finalNormalGifts.find(g => g.product_id === gift.product_id && g.tier_name === gift.tier_name);
-          if (existingGift) {
-            existingGift.qty += gift.qty;
-          } else {
-            finalNormalGifts.push({ ...gift });
-          }
-        });
-        remainingAmount -= group.min_total_qty;
+      for (const group of greedyTiers) {
+        if (group.min_total_qty <= 0) continue;
+        while (remainingAmount >= group.min_total_qty) {
+          suggestedKeys.push(`${group.tier_name}_${group.min_total_qty}`);
+          remainingAmount -= group.min_total_qty;
+          // Ở đây ta giả định 1 mốc chỉ chọn 1 lần trong đề xuất để tương đồng với manual
+          // Nếu user muốn auto lặp lại mốc (ví dụ 500k = 5 gói 100k), cần logic khác.
+          // Tạm thời fix suggestedKeys.push 1 lần rồi break while.
+          break; 
+        }
+      }
+      setSelectedTierKeys(suggestedKeys);
+    } else {
+      // Nếu đang ở chế độ thủ công, chỉ lọc bỏ các mốc không còn đủ điều kiện
+      setSelectedTierKeys(prev => prev.filter(key => eligibleNormalTiers.some((g: any) => `${g.tier_name}_${g.min_total_qty}` === key)));
+    }
+
+    // 3. Tính toán quà tặng thực tế dựa trên selectedTierKeys (dù là auto hay manual)
+    let finalNormalGifts: any[] = [];
+    let currentSelectedTotal = 0;
+
+    for (const group of sortedGroupedTiers) {
+      const key = `${group.tier_name}_${group.min_total_qty}`;
+      if (selectedTierKeys.includes(key)) {
+        if (currentSelectedTotal + group.min_total_qty <= cartTotal) {
+          group.gifts.forEach((gift: any) => {
+            const existingGift = finalNormalGifts.find(g => g.product_id === gift.product_id && g.tier_name === gift.tier_name);
+            if (existingGift) {
+              existingGift.qty += gift.qty;
+            } else {
+              finalNormalGifts.push({ ...gift });
+            }
+          });
+          currentSelectedTotal += group.min_total_qty;
+        }
       }
     }
 
-    // Gộp với các gói ON-TOP (cộng dồn, không trừ vào số tiền còn lại)
+    // 4. Gộp với các gói ON-TOP (luôn tự động)
     let finalGifts = [...finalNormalGifts];
     for (const ontop of eligibleOntopTiers) {
       if (cartTotal >= ontop.min_total_qty) {
@@ -662,7 +693,7 @@ export default function PGDashboard() {
 
     setApplicableGifts(finalGifts);
 
-  }, [cart, cartTotal, activePromotions, products, selectedShopId]);
+  }, [cart, cartTotal, activePromotions, products, selectedShopId, selectedTierKeys, isManualGiftMode]);
 
 
   const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
@@ -787,6 +818,9 @@ export default function PGDashboard() {
       toast.success('🎉 Đã lưu đơn hàng và tải ảnh thành công!');
       setCart([]);
       setApplicableGifts([]);
+      setEligibleTiers([]);
+      setSelectedTierKeys([]);
+      setIsManualGiftMode(false);
       setCustomerName('');
       setCustomerPhone('');
       setBillImages([]);
@@ -1018,38 +1052,143 @@ export default function PGDashboard() {
             </div>
           </div>
 
-          {/* KHU VỰC HIỂN THỊ QUÀ TẶNG */}
+          {/* KHU VỰC QUÀ TẶNG - Đề xuất hoặc Thủ công */}
+          {eligibleTiers.length > 0 && (
+            <div className="mt-6 pt-6 border-t border-gray-100">
+              {/* Header logic */}
+              <div className="flex justify-between items-end mb-4 px-1">
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider flex items-center">
+                    <span className="mr-2">🎁</span> {isManualGiftMode ? 'CHỌN QUÀ TẶNG THỦ CÔNG' : 'QUÀ TẶNG ĐỀ XUẤT'}
+                  </h3>
+                  <p className="text-[10px] text-gray-500 mt-1 font-medium">
+                    {isManualGiftMode 
+                      ? 'PG đang tự chọn combo quà tặng theo yêu cầu khách' 
+                      : 'Hệ thống đã tự động chọn gói quà tối ưu nhất'}
+                  </p>
+                </div>
+                {!isManualGiftMode ? (
+                  <button 
+                    onClick={() => setIsManualGiftMode(true)}
+                    className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded hover:bg-indigo-100 transition-colors"
+                  >
+                    Thay đổi / Chọn quà khác
+                  </button>
+                ) : (
+                  <button 
+                    onClick={() => setIsManualGiftMode(false)}
+                    className="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded hover:bg-gray-200 transition-colors"
+                  >
+                    Dùng đề xuất mặc định
+                  </button>
+                )}
+              </div>
+
+              {/* Ngân sách chỉ hiện khi ở chế độ thủ công */}
+              {isManualGiftMode && (
+                <div className="bg-indigo-50 p-3 rounded-xl mb-4 flex justify-between items-center border border-indigo-100">
+                  <span className="text-xs font-bold text-indigo-700">Ngân sách quà còn lại:</span>
+                  <span className="text-sm font-black text-indigo-700">
+                    {new Intl.NumberFormat('vi-VN').format(
+                      cartTotal - eligibleTiers
+                        .filter(t => selectedTierKeys.includes(`${t.tier_name}_${t.min_total_qty}`))
+                        .reduce((sum, t) => sum + t.min_total_qty, 0)
+                    )}đ
+                  </span>
+                </div>
+              )}
+
+              {/* Danh sách combo quà (Chỉ hiện khi thủ công) */}
+              {isManualGiftMode && (
+                <div className="space-y-3 mb-6">
+                  {eligibleTiers.map((tier, idx) => {
+                    const key = `${tier.tier_name}_${tier.min_total_qty}`;
+                    const isSelected = selectedTierKeys.includes(key);
+                    const selectedTotal = eligibleTiers
+                      .filter(t => selectedTierKeys.includes(`${t.tier_name}_${t.min_total_qty}`))
+                      .reduce((sum, t) => sum + t.min_total_qty, 0);
+                    
+                    const canSelect = isSelected || (selectedTotal + tier.min_total_qty <= cartTotal);
+
+                    return (
+                      <label 
+                        key={idx} 
+                        className={clsx(
+                          "flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-pointer group",
+                          isSelected 
+                            ? "bg-pink-50 border-pink-400 shadow-sm" 
+                            : canSelect 
+                              ? "bg-white border-gray-100 hover:border-pink-200" 
+                              : "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed"
+                        )}
+                      >
+                        <div className="flex items-center space-x-4 flex-1">
+                          <div className={clsx(
+                            "w-5 h-5 rounded flex items-center justify-center border-2 transition-colors",
+                            isSelected ? "bg-pink-500 border-pink-500 text-white" : "border-gray-200 group-hover:border-pink-300 bg-white"
+                          )}>
+                            {isSelected && <Check className="w-3.5 h-3.5 stroke-[4]" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-gray-800 text-sm leading-tight mb-0.5 truncate">{tier.tier_name}</div>
+                            <div className="text-[11px] font-bold text-pink-600 flex items-center">
+                              Min: {new Intl.NumberFormat('vi-VN').format(tier.min_total_qty)}đ
+                              <span className="mx-2 text-gray-300">|</span>
+                              {tier.gifts.length} loại quà
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <input 
+                          type="checkbox" 
+                          className="hidden"
+                          checked={isSelected}
+                          disabled={!canSelect}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              if (canSelect) {
+                                setSelectedTierKeys([...selectedTierKeys, key]);
+                              } else {
+                                toast.error('Gói quà này vượt quá ngân sách đơn hàng còn lại!');
+                              }
+                            } else {
+                              setSelectedTierKeys(prev => prev.filter(k => k !== key));
+                            }
+                          }}
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* KHU VỰC HIỂN THỊ CHI TIẾT QUÀ TẶNG (TỔNG HỢP) */}
           {applicableGifts.length > 0 && (
-            <div className="mt-4 space-y-3">
+            <div className={clsx(
+              "space-y-3 pt-6 border-t border-dashed border-gray-200",
+              isManualGiftMode ? "mt-4" : "mt-0"
+            )}>
+               <h4 className="text-[10px] font-black text-gray-400 uppercase tracking-[0.15em] mb-4 text-center">Tóm tắt quà tặng kèm theo đơn</h4>
               {applicableGifts.map((gift, idx) => {
                 const inventoryItem = inventoryData.find((i: any) => i.product_id === gift.product_id);
                 const stockQty = inventoryItem ? inventoryItem.quantity : 0;
                 
                 return (
-                  <div key={idx} className="p-4 bg-pink-50 rounded-xl border border-pink-200">
-                    {/* DÒNG 1: Tiêu đề & Tồn kho ngang hàng */}
-                    <div className="flex justify-between items-center mb-3">
-                      <h4 className="text-xs font-bold text-pink-700 uppercase flex items-center m-0">
-                        <span className="mr-1.5 text-base">🎁</span> Quà tặng kèm theo đơn
-                      </h4>
-                      <span className="text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded px-2 py-0.5 shadow-sm">
-                        Tồn: {stockQty}
-                      </span>
+                  <div key={idx} className="p-3 bg-pink-50 rounded-xl border border-pink-100 flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-white p-1.5 rounded-lg shadow-sm">
+                        <Gift className="w-4 h-4 text-pink-500" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-pink-900">{gift.product_name}</div>
+                        <div className="text-[10px] text-pink-600 font-medium">{gift.tier_name}</div>
+                      </div>
                     </div>
-                    
-                    {/* DÒNG 2: Tên quà tặng & Số lượng tặng ngang hàng */}
-                    <div className="flex justify-between items-start mb-1.5">
-                      <span className="font-bold text-pink-900 text-sm pr-4 leading-tight">
-                        {gift.product_name}
-                      </span>
-                      <span className="font-extrabold text-pink-700 text-base whitespace-nowrap">
-                        x {gift.qty}
-                      </span>
-                    </div>
-                    
-                    {/* DÒNG 3: Chi tiết chương trình khuyến mãi */}
-                    <div className="text-[11px] text-pink-600 leading-snug">
-                      KM: {gift.tier_name}
+                    <div className="text-right">
+                      <div className="text-sm font-black text-pink-700">x{gift.qty}</div>
+                      <div className="text-[9px] text-gray-400">Tồn: {stockQty}</div>
                     </div>
                   </div>
                 );
