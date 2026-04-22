@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -64,10 +64,8 @@ export default function PGDashboard() {
   const [locationError, setLocationError] = useState<string | null>(null);
 
   const [cart, setCart] = useState<CartItem[]>([]);
-  const [eligibleTiers, setEligibleTiers] = useState<any[]>([]);
-  const [selectedTierKeys, setSelectedTierKeys] = useState<string[]>([]);
+  const [selectedTierCounts, setSelectedTierCounts] = useState<Record<string, number>>({});
   const [isManualGiftMode, setIsManualGiftMode] = useState(false);
-  const [applicableGifts, setApplicableGifts] = useState<any[]>([]);
   
   // State cho thông tin khách hàng & Bill
   const [customerName, setCustomerName] = useState('');
@@ -551,12 +549,9 @@ export default function PGDashboard() {
     setPendingOcrItems([]);
   };
 
-  // --- THUẬT TOÁN TÍNH KHUYẾN MÃI TỰ ĐỘNG ---
-  useEffect(() => {
-    if (cart.length === 0) {
-      setApplicableGifts(prev => prev.length === 0 ? prev : []);
-      return;
-    }
+  // --- LOGIC TÍNH TOÁN QUÀ TẶNG ---
+  const eligibleTiersData = useMemo(() => {
+    if (cart.length === 0) return { eligibleNormalTiers: [], eligibleOntopTiers: [], sortedGroupedTiers: [] };
 
     let allNormalTiers: any[] = [];
     let eligibleOntopTiers: any[] = [];
@@ -566,29 +561,22 @@ export default function PGDashboard() {
 
       promo.tiers?.forEach((tier: any) => {
         let allConditionsMet = true;
-        
         if (tier.conditions && tier.conditions.length > 0) {
           tier.conditions.forEach((cond: any) => {
             const targetValuesStr = Array.isArray(cond.target_values) 
               ? cond.target_values.join(',').toLowerCase() 
               : String(cond.target_values || '').toLowerCase();
-              
             let conditionValue = 0;
-            
             cart.forEach(item => {
               const product = products.find(p => p.product_id === item.product_id);
               if (!product) return;
-              
               if (cond.condition_type === 'Nhãn hàng' && targetValuesStr.includes(product.brand_name.toLowerCase())) {
                 conditionValue += item.net_value;
               } else if (cond.condition_type === 'Sản phẩm cụ thể' && targetValuesStr.includes(product.product_name.toLowerCase())) {
                 conditionValue += item.net_value;
               }
             });
-            
-            if (conditionValue < cond.min_target_value) {
-              allConditionsMet = false;
-            }
+            if (conditionValue < cond.min_target_value) allConditionsMet = false;
           });
         }
 
@@ -602,98 +590,100 @@ export default function PGDashboard() {
               tier_name: tier.tier_name,
               min_total_qty: tier.min_total_qty 
             };
-
-            if (tier.is_ontop) {
-              eligibleOntopTiers.push(giftData);
-            } else {
-              allNormalTiers.push(giftData);
-            }
+            if (tier.is_ontop) eligibleOntopTiers.push(giftData);
+            else allNormalTiers.push(giftData);
           }
         }
       });
     });
 
-    // Nhóm các quà tặng của cùng một mốc (tier) lại với nhau
     const groupedNormalTiers: Record<string, any> = {};
-    
     allNormalTiers.forEach(tier => {
       const key = `${tier.tier_name}_${tier.min_total_qty}`;
       if (!groupedNormalTiers[key]) {
-        groupedNormalTiers[key] = {
-          tier_name: tier.tier_name,
-          min_total_qty: tier.min_total_qty,
-          gifts: []
-        };
+        groupedNormalTiers[key] = { tier_name: tier.tier_name, min_total_qty: tier.min_total_qty, gifts: [] };
       }
       groupedNormalTiers[key].gifts.push(tier);
     });
 
     const sortedGroupedTiers = Object.values(groupedNormalTiers).sort((a: any, b: any) => b.min_total_qty - a.min_total_qty);
-
-    // 1. Lưu lại danh sách các mốc "Đủ điều kiện" để PG chọn/hệ thống đề xuất
     const eligibleNormalTiers = sortedGroupedTiers.filter((group: any) => group.min_total_qty > 0 && group.min_total_qty <= cartTotal);
-    setEligibleTiers(eligibleNormalTiers);
 
-    // 2. Logic đề xuất tự động (Greedy) nếu chưa bật chế độ thủ công
+    return { eligibleNormalTiers, eligibleOntopTiers, sortedGroupedTiers };
+  }, [cart, cartTotal, activePromotions, products, selectedShopId]);
+
+  // Đồng bộ selectedTierCounts khi cart thay đổi hoặc chế độ thay đổi
+  useEffect(() => {
+    const { eligibleNormalTiers } = eligibleTiersData;
+    
     if (!isManualGiftMode) {
+      // Chế độ tự động: Tính toán Greedy
       let remainingAmount = cartTotal;
-      let suggestedKeys: string[] = [];
+      let suggestedCounts: Record<string, number> = {};
       const greedyTiers = [...eligibleNormalTiers].sort((a: any, b: any) => b.min_total_qty - a.min_total_qty);
       
       for (const group of greedyTiers) {
-        if (group.min_total_qty <= 0) continue;
-        while (remainingAmount >= group.min_total_qty) {
-          suggestedKeys.push(`${group.tier_name}_${group.min_total_qty}`);
-          remainingAmount -= group.min_total_qty;
-          // Ở đây ta giả định 1 mốc chỉ chọn 1 lần trong đề xuất để tương đồng với manual
-          // Nếu user muốn auto lặp lại mốc (ví dụ 500k = 5 gói 100k), cần logic khác.
-          // Tạm thời fix suggestedKeys.push 1 lần rồi break while.
-          break; 
+        const count = Math.floor(remainingAmount / group.min_total_qty);
+        if (count > 0) {
+          suggestedCounts[`${group.tier_name}_${group.min_total_qty}`] = count;
+          remainingAmount -= count * group.min_total_qty;
         }
       }
-      setSelectedTierKeys(suggestedKeys);
+      
+      setSelectedTierCounts(prev => {
+        // Chỉ update nếu thực sự thay đổi để tránh loop
+        if (JSON.stringify(suggestedCounts) === JSON.stringify(prev)) return prev;
+        return suggestedCounts;
+      });
     } else {
-      // Nếu đang ở chế độ thủ công, chỉ lọc bỏ các mốc không còn đủ điều kiện
-      setSelectedTierKeys(prev => prev.filter(key => eligibleNormalTiers.some((g: any) => `${g.tier_name}_${g.min_total_qty}` === key)));
+      // Chế độ thủ công: Chỉ loại bỏ các mốc không còn hợp lệ
+      setSelectedTierCounts(prev => {
+        const newCounts = { ...prev };
+        let updated = false;
+        Object.keys(newCounts).forEach(key => {
+          if (!eligibleNormalTiers.some((g: any) => `${g.tier_name}_${g.min_total_qty}` === key)) {
+            delete newCounts[key];
+            updated = true;
+          }
+        });
+        return updated ? newCounts : prev;
+      });
     }
+  }, [cartTotal, eligibleTiersData, isManualGiftMode]);
 
-    // 3. Tính toán quà tặng thực tế dựa trên selectedTierKeys (dù là auto hay manual)
+  const applicableGifts = useMemo(() => {
+    const { sortedGroupedTiers, eligibleOntopTiers } = eligibleTiersData;
     let finalNormalGifts: any[] = [];
     let currentSelectedTotal = 0;
 
     for (const group of sortedGroupedTiers) {
       const key = `${group.tier_name}_${group.min_total_qty}`;
-      if (selectedTierKeys.includes(key)) {
-        if (currentSelectedTotal + group.min_total_qty <= cartTotal) {
+      const count = selectedTierCounts[key] || 0;
+      if (count > 0) {
+        const possibleCount = Math.min(count, Math.floor((cartTotal - currentSelectedTotal) / group.min_total_qty));
+        if (possibleCount > 0) {
           group.gifts.forEach((gift: any) => {
             const existingGift = finalNormalGifts.find(g => g.product_id === gift.product_id && g.tier_name === gift.tier_name);
-            if (existingGift) {
-              existingGift.qty += gift.qty;
-            } else {
-              finalNormalGifts.push({ ...gift });
-            }
+            if (existingGift) existingGift.qty += gift.qty * possibleCount;
+            else finalNormalGifts.push({ ...gift, qty: gift.qty * possibleCount });
           });
-          currentSelectedTotal += group.min_total_qty;
+          currentSelectedTotal += possibleCount * group.min_total_qty;
         }
       }
     }
 
-    // 4. Gộp với các gói ON-TOP (luôn tự động)
     let finalGifts = [...finalNormalGifts];
     for (const ontop of eligibleOntopTiers) {
       if (cartTotal >= ontop.min_total_qty) {
         const existingGift = finalGifts.find(g => g.product_id === ontop.product_id && g.tier_name === ontop.tier_name);
-        if (existingGift) {
-          existingGift.qty += ontop.qty;
-        } else {
-          finalGifts.push({ ...ontop });
-        }
+        if (existingGift) existingGift.qty += ontop.qty;
+        else finalGifts.push({ ...ontop });
       }
     }
+    return finalGifts;
+  }, [eligibleTiersData, selectedTierCounts, cartTotal]);
 
-    setApplicableGifts(finalGifts);
-
-  }, [cart, cartTotal, activePromotions, products, selectedShopId, selectedTierKeys, isManualGiftMode]);
+  const eligibleTiers = eligibleTiersData.eligibleNormalTiers;
 
 
   const selectedSchedule = shops.find((s: any) => s.shop_id === selectedShopId);
@@ -817,9 +807,7 @@ export default function PGDashboard() {
     onSuccess: () => {
       toast.success('🎉 Đã lưu đơn hàng và tải ảnh thành công!');
       setCart([]);
-      setApplicableGifts([]);
-      setEligibleTiers([]);
-      setSelectedTierKeys([]);
+      setSelectedTierCounts({});
       setIsManualGiftMode(false);
       setCustomerName('');
       setCustomerPhone('');
@@ -1115,8 +1103,7 @@ export default function PGDashboard() {
                   <span className="text-sm font-black text-indigo-700">
                     {new Intl.NumberFormat('vi-VN').format(
                       cartTotal - eligibleTiers
-                        .filter(t => selectedTierKeys.includes(`${t.tier_name}_${t.min_total_qty}`))
-                        .reduce((sum, t) => sum + t.min_total_qty, 0)
+                        .reduce((sum, t) => sum + (selectedTierCounts[`${t.tier_name}_${t.min_total_qty}`] || 0) * t.min_total_qty, 0)
                     )}đ
                   </span>
                 </div>
@@ -1127,60 +1114,68 @@ export default function PGDashboard() {
                 <div className="space-y-3 mb-6">
                   {eligibleTiers.map((tier, idx) => {
                     const key = `${tier.tier_name}_${tier.min_total_qty}`;
-                    const isSelected = selectedTierKeys.includes(key);
+                    const count = selectedTierCounts[key] || 0;
                     const selectedTotal = eligibleTiers
-                      .filter(t => selectedTierKeys.includes(`${t.tier_name}_${t.min_total_qty}`))
-                      .reduce((sum, t) => sum + t.min_total_qty, 0);
+                      .reduce((sum, t) => sum + (selectedTierCounts[`${t.tier_name}_${t.min_total_qty}`] || 0) * t.min_total_qty, 0);
                     
-                    const canSelect = isSelected || (selectedTotal + tier.min_total_qty <= cartTotal);
+                    const canIncrease = (selectedTotal + tier.min_total_qty <= cartTotal);
 
                     return (
-                      <label 
+                      <div 
                         key={idx} 
                         className={clsx(
-                          "flex items-center justify-between p-4 rounded-xl border-2 transition-all cursor-pointer group",
-                          isSelected 
+                          "flex items-center justify-between p-4 rounded-xl border-2 transition-all group",
+                          count > 0 
                             ? "bg-pink-50 border-pink-400 shadow-sm" 
-                            : canSelect 
-                              ? "bg-white border-gray-100 hover:border-pink-200" 
-                              : "bg-gray-50 border-gray-100 opacity-60 cursor-not-allowed"
+                            : "bg-white border-gray-100 hover:border-pink-200"
                         )}
                       >
-                        <div className="flex items-center space-x-4 flex-1">
-                          <div className={clsx(
-                            "w-5 h-5 rounded flex items-center justify-center border-2 transition-colors",
-                            isSelected ? "bg-pink-500 border-pink-500 text-white" : "border-gray-200 group-hover:border-pink-300 bg-white"
-                          )}>
-                            {isSelected && <Check className="w-3.5 h-3.5 stroke-[4]" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-bold text-gray-800 text-sm leading-tight mb-0.5 truncate">{tier.tier_name}</div>
-                            <div className="text-[11px] font-bold text-pink-600 flex items-center">
-                              Min: {new Intl.NumberFormat('vi-VN').format(tier.min_total_qty)}đ
-                              <span className="mx-2 text-gray-300">|</span>
-                              {tier.gifts.length} loại quà
-                            </div>
+                        <div className="flex-1 min-w-0 pr-4">
+                          <div className="font-bold text-gray-800 text-sm leading-tight mb-0.5 truncate">{tier.tier_name}</div>
+                          <div className="text-[11px] font-bold text-pink-600 flex items-center">
+                            Giá trị: {new Intl.NumberFormat('vi-VN').format(tier.min_total_qty)}đ
+                            <span className="mx-2 text-gray-300">|</span>
+                            {tier.gifts.length} loại quà
                           </div>
                         </div>
-                        
-                        <input 
-                          type="checkbox" 
-                          className="hidden"
-                          checked={isSelected}
-                          disabled={!canSelect}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              if (canSelect) {
-                                setSelectedTierKeys([...selectedTierKeys, key]);
-                              } else {
-                                toast.error('Gói quà này vượt quá ngân sách đơn hàng còn lại!');
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (count > 0) {
+                                setSelectedTierCounts({ ...selectedTierCounts, [key]: count - 1 });
                               }
-                            } else {
-                              setSelectedTierKeys(prev => prev.filter(k => k !== key));
-                            }
-                          }}
-                        />
-                      </label>
+                            }}
+                            disabled={count <= 0}
+                            className={clsx(
+                              "p-2 rounded-lg transition-colors",
+                              count > 0 ? "bg-white border border-pink-200 text-pink-600 active:scale-90" : "bg-gray-50 text-gray-300"
+                            )}
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          <div className="w-8 text-center font-black text-lg text-gray-900">{count}</div>
+                          
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (canIncrease) {
+                                setSelectedTierCounts({ ...selectedTierCounts, [key]: count + 1 });
+                              } else {
+                                toast.error('Hóa đơn không đủ ngân sách để thêm gói quà này!');
+                              }
+                            }}
+                            className={clsx(
+                              "p-2 rounded-lg transition-colors active:scale-90",
+                              canIncrease ? "bg-pink-500 text-white shadow-md shadow-pink-200" : "bg-gray-100 text-gray-400"
+                            )}
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>

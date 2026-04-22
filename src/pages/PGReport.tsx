@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay } from 'date-fns';
-import { BarChart3, ChevronDown, ChevronUp, Image as ImageIcon, Eye, X, FileText } from 'lucide-react';
+import { BarChart3, ChevronDown, ChevronUp, Image as ImageIcon, Eye, X, FileText, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ComposedChart, Line
 } from 'recharts';
@@ -20,6 +21,7 @@ interface KPI {
 
 export default function PGReport() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [selectedPgId, setSelectedPgId] = useState<string>('');
@@ -257,9 +259,39 @@ export default function PGReport() {
       tableData: sortedTableData,
       detailedOrders,
       monthlyChartData,
-      averageSales
+      averageSales,
+      isToday: selectedDate === format(new Date(), 'yyyy-MM-dd')
     };
   }, [shouldFetch, orders, kpis, selectedDate, allProfiles, pgIdToUse, user]);
+
+  // mutation xóa đơn hàng
+  const deleteOrderMutation = useMutation({
+    mutationFn: async (cartId: string) => {
+      // 1. Phải xóa details trước nếu không có cascade
+      // Nhưng thường thì db thiết kế cascade. Thử xóa Order (header)
+      const { error } = await supabase
+        .from('orders')
+        .delete()
+        .eq('cart_id', cartId);
+      
+      if (error) throw error;
+      return cartId;
+    },
+    onSuccess: () => {
+      toast.success('Đã xóa đơn hàng thành công');
+      queryClient.invalidateQueries({ queryKey: ['pg_orders'] });
+      queryClient.invalidateQueries({ queryKey: ['todaySales'] });
+    },
+    onError: (error: any) => {
+      toast.error(`Lỗi khi xóa đơn hàng: ${error.message}`);
+    }
+  });
+
+  const handleDeleteOrder = (cartId: string) => {
+    if (window.confirm('Bạn có chắc chắn muốn xóa đơn hàng này? Thao tác này không thể hoàn tác.')) {
+      deleteOrderMutation.mutate(cartId);
+    }
+  };
 
   if (!user) return <div className="p-10 text-center font-medium text-gray-500">Đang kiểm tra quyền truy cập...</div>;
 
@@ -507,6 +539,20 @@ export default function PGReport() {
                                 <ImageIcon className="w-4 h-4" />
                               </button>
                             )}
+                            
+                            {reportData.isToday && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteOrder(order.cart_id);
+                                }}
+                                className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                                title="Xóa đơn hàng"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+
                             <div className="text-gray-400">
                               {expandedCartId === order.cart_id ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                             </div>
