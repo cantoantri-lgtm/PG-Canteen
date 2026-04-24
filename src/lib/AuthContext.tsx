@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { supabase } from './supabase';
+import { toast } from 'sonner';
 
 // Định nghĩa thông tin User dựa trên bảng public.profiles
 export interface Profile {
@@ -12,6 +14,7 @@ export interface Profile {
   email?: string;
   login_pin?: string;
   manager_id?: string;
+  status?: boolean;
 }
 
 interface AuthContextType {
@@ -35,7 +38,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (storedUser) {
         console.log('AuthContext: Đã tìm thấy tài khoản hợp lệ');
-        setUser(JSON.parse(storedUser));
+        const parsedUser = JSON.parse(storedUser);
+        setUser(parsedUser);
+
+        // Verify status and schedule asynchronously
+        supabase.from('profiles').select('status, roles(role_name)').eq('id', parsedUser.id).single().then(async ({data, error}) => {
+          if (error || !data || data.status === false) {
+             // Invalid or inactive user -> logout
+             localStorage.removeItem('shop_user');
+             setUser(null);
+             if (window.location.pathname !== '/') {
+               toast.error("Tài khoản của bạn đã bị khóa hoặc không hoạt động. Đã tự động đăng xuất.");
+               setTimeout(() => { window.location.href = '/'; }, 1500);
+             }
+             return;
+          }
+          
+          const profileData = data as any;
+          const roleName = Array.isArray(profileData.roles) ? profileData.roles[0]?.role_name : profileData.roles?.role_name;
+          if (roleName?.toUpperCase() === 'PG') {
+            const today = new Date().toISOString().split('T')[0];
+            const { data: userSchedules, error: scheduleError } = await supabase
+              .from('schedules')
+              .select('schedule_id')
+              .eq('pg_id', parsedUser.id)
+              .lte('start_date', today)
+              .gte('end_date', today);
+
+            if (scheduleError || !userSchedules || userSchedules.length === 0) {
+              // No schedule today -> logout
+              localStorage.removeItem('shop_user');
+              setUser(null);
+              if (window.location.pathname !== '/') {
+                toast.error("Bạn không có lịch bán hàng trong ngày hôm nay. Đã tự động đăng xuất.");
+                setTimeout(() => { window.location.href = '/'; }, 1500);
+              }
+              return;
+            }
+          }
+        });
       } else {
         console.log('AuthContext: Chưa có ai đăng nhập');
         setUser(null);

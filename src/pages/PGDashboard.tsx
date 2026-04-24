@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Link } from 'react-router-dom';
-import { Camera, Check, X, FileText, UserCircle, Gift, BarChart3, Plus, Minus } from 'lucide-react';
+import { Camera, Check, X, FileText, UserCircle, Gift, BarChart3, Plus, Minus, ImagePlus } from 'lucide-react';
 import clsx from 'clsx';
 import { matchProduct, learnAlias, logOcrError } from '../services/ocrLearningService';
 import Scanbill from '../components/Scanbill';
@@ -73,6 +73,7 @@ export default function PGDashboard() {
   const [billImages, setBillImages] = useState<File[]>([]);
   const [billPreviews, setBillPreviews] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   
   // State cho OCR Learning
   const [pendingOcrItems, setPendingOcrItems] = useState<PendingOcrItem[]>([]);
@@ -174,23 +175,15 @@ export default function PGDashboard() {
         .select('*')
         .eq('item_type', 'Quà tặng');
       
-      const getRel = (val: any) => Array.isArray(val) ? val[0] : val;
-
-      const normalProducts = (productsData || []).map((p: any) => {
-        const pg = getRel(p.product_group);
-        const br = getRel(pg?.brands);
-        const cat = getRel(br?.categories);
-        
-        return {
-          product_id: p.product_id,
-          product_name: p.product_name || pg?.name,
-          product_group_name: pg?.name || '',
-          value: p.value || 0,
-          item_type: p.item_type,
-          brand_name: br?.brand_name || '',
-          category_name: cat?.name || '',
-        };
-      });
+      const normalProducts = (productsData || []).map((p: any) => ({
+        product_id: p.product_id,
+        product_name: p.product_name || p.product_group?.name,
+        product_group_name: p.product_group?.name || '',
+        value: p.value || 0,
+        item_type: p.item_type,
+        brand_name: p.product_group?.brands?.brand_name || '',
+        category_name: p.product_group?.brands?.categories?.name || '',
+      }));
 
       const giftProducts = (giftProductsData || []).map((p: any) => ({
         product_id: p.product_id,
@@ -1032,6 +1025,21 @@ export default function PGDashboard() {
                   }
                 }}
               />
+              <input 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                ref={galleryInputRef}
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (files.length > 0) {
+                    setBillImages(prev => [...prev, ...files]);
+                    const newPreviews = files.map(file => URL.createObjectURL(file));
+                    setBillPreviews(prev => [...prev, ...newPreviews]);
+                  }
+                }}
+              />
               
               {/* Grid hiển thị ảnh đã chọn */}
               {billPreviews.length > 0 && (
@@ -1055,19 +1063,35 @@ export default function PGDashboard() {
                     className="border-2 border-dashed border-indigo-200 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30 aspect-square"
                   >
                     <Camera className="w-5 h-5" />
-                    <span className="text-[10px] font-medium">Thêm ảnh</span>
+                    <span className="text-[10px] font-medium">Chụp ảnh</span>
+                  </button>
+                  <button 
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="border-2 border-dashed border-indigo-200 rounded-lg flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30 aspect-square"
+                  >
+                    <ImagePlus className="w-5 h-5" />
+                    <span className="text-[10px] font-medium">Từ thư viện</span>
                   </button>
                 </div>
               )}
 
               {billPreviews.length === 0 && (
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="w-full py-8 border-2 border-dashed border-indigo-200 rounded-xl flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30"
-                >
-                  <Camera className="w-8 h-8 mb-2" />
-                  <span className="text-sm font-medium">Chụp ảnh hóa đơn {requireBillImage ? '(Bắt buộc)' : '(Tùy chọn)'}</span>
-                </button>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 py-8 border-2 border-dashed border-indigo-200 rounded-xl flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30"
+                  >
+                    <Camera className="w-8 h-8 mb-2" />
+                    <span className="text-sm font-medium">Chụp hóa đơn {requireBillImage ? '(Bắt buộc)' : '(Tùy chọn)'}</span>
+                  </button>
+                  <button 
+                    onClick={() => galleryInputRef.current?.click()}
+                    className="flex-1 py-8 border-2 border-dashed border-indigo-200 rounded-xl flex flex-col items-center justify-center text-indigo-400 hover:border-indigo-400 hover:text-indigo-600 transition-all bg-indigo-50/30"
+                  >
+                    <ImagePlus className="w-8 h-8 mb-2" />
+                    <span className="text-sm font-medium">Tải ảnh thư viện</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>

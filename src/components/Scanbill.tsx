@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Camera } from 'lucide-react';
+import { Camera, ImagePlus } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
 import { toast } from 'sonner';
 import { matchProduct } from '../services/ocrLearningService';
@@ -43,6 +43,7 @@ interface ScanbillProps {
 
 export default function Scanbill({ products, productAliases, ocrErrors = [], onScanComplete, disabled }: ScanbillProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState('');
@@ -305,19 +306,36 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
 
   return (
     <>
-      <button 
-        onClick={() => fileInputRef.current?.click()} 
-        disabled={isScanning || disabled}
-        className="flex-1 bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-      >
-        <Camera size={20} />
-        {isScanning ? 'ĐANG QUÉT...' : 'QUÉT BILL'}
-      </button>
+      <div className="flex gap-2 flex-1">
+        <button 
+          onClick={() => fileInputRef.current?.click()} 
+          disabled={isScanning || disabled}
+          className="flex-1 bg-purple-50 text-purple-700 py-3 rounded-xl font-bold hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+        >
+          <Camera size={20} />
+          {isScanning ? 'ĐANG QUÉT...' : 'QUÉT BILL'}
+        </button>
+        <button 
+          onClick={() => galleryInputRef.current?.click()} 
+          disabled={isScanning || disabled}
+          className="px-4 bg-purple-50 text-purple-700 rounded-xl hover:bg-purple-100 disabled:opacity-50 transition-colors flex items-center justify-center"
+          title="Chọn ảnh từ thư viện"
+        >
+          <ImagePlus size={20} />
+        </button>
+      </div>
       <input 
         type="file" 
         accept="image/*" 
         capture="environment"
         ref={fileInputRef} 
+        onChange={handleScanBill} 
+        className="hidden" 
+      />
+      <input 
+        type="file" 
+        accept="image/*" 
+        ref={galleryInputRef} 
         onChange={handleScanBill} 
         className="hidden" 
       />

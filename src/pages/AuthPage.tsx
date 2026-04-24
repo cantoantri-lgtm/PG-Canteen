@@ -37,6 +37,30 @@ export default function AuthPage() {
         return;
       }
 
+      if (data.status === false) {
+        toast.error("Tài khoản của bạn đã bị khóa hoặc không hoạt động. Vui lòng liên hệ quản trị viên.");
+        setLoading(false);
+        return;
+      }
+
+      const roleName = Array.isArray(data.roles) ? data.roles[0]?.role_name : data.roles?.role_name;
+      
+      if (roleName?.toUpperCase() === 'PG') {
+        const today = new Date().toISOString().split('T')[0];
+        const { data: userSchedules, error: scheduleError } = await supabase
+          .from('schedules')
+          .select('schedule_id')
+          .eq('pg_id', data.id)
+          .lte('start_date', today)
+          .gte('end_date', today);
+
+        if (scheduleError || !userSchedules || userSchedules.length === 0) {
+          toast.error("Bạn không có lịch bán hàng trong ngày hôm nay. Thuê bao đã bị từ chối truy cập.");
+          setLoading(false);
+          return;
+        }
+      }
+
       // 2. Lấy mã PIN từ database để kiểm tra
       const storedPin = data.login_pin ? String(data.login_pin) : '123456';
       
