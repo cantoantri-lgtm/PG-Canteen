@@ -624,7 +624,16 @@ export default function PGDashboard() {
       const greedyTiers = [...eligibleNormalTiers].sort((a: any, b: any) => b.min_total_qty - a.min_total_qty);
       
       for (const group of greedyTiers) {
-        const count = Math.floor(remainingAmount / group.min_total_qty);
+        const stockInfo = group.gifts.map((g: any) => {
+          const inv = inventoryData.find((i: any) => i.product_id === g.product_id);
+          const stock = inv ? inv.quantity : 0;
+          return Math.floor(stock / g.qty);
+        });
+        const tierStock = stockInfo.length > 0 ? Math.min(...stockInfo) : 0;
+
+        const maxAffordable = Math.floor(remainingAmount / group.min_total_qty);
+        const count = Math.min(maxAffordable, tierStock);
+        
         if (count > 0) {
           suggestedCounts[`${group.tier_name}_${group.min_total_qty}`] = count;
           remainingAmount -= count * group.min_total_qty;
@@ -650,7 +659,7 @@ export default function PGDashboard() {
         return updated ? newCounts : prev;
       });
     }
-  }, [cartTotal, eligibleTiersData, isManualGiftMode]);
+  }, [cartTotal, eligibleTiersData, isManualGiftMode, inventoryData]);
 
   const applicableGifts = useMemo(() => {
     const { sortedGroupedTiers, eligibleOntopTiers } = eligibleTiersData;
@@ -676,13 +685,24 @@ export default function PGDashboard() {
     let finalGifts = [...finalNormalGifts];
     for (const ontop of eligibleOntopTiers) {
       if (cartTotal >= ontop.min_total_qty) {
-        const existingGift = finalGifts.find(g => g.product_id === ontop.product_id && g.tier_name === ontop.tier_name);
-        if (existingGift) existingGift.qty += ontop.qty;
-        else finalGifts.push({ ...ontop });
+        const inv = inventoryData.find((i: any) => i.product_id === ontop.product_id);
+        const stock = inv ? inv.quantity : 0;
+        
+        let qtyToAdd = ontop.qty;
+        const currentQty = finalGifts.reduce((sum, g) => g.product_id === ontop.product_id ? sum + g.qty : sum, 0);
+        const availableStock = Math.max(0, stock - currentQty);
+        
+        qtyToAdd = Math.min(qtyToAdd, availableStock);
+        
+        if (qtyToAdd > 0) {
+          const existingGift = finalGifts.find(g => g.product_id === ontop.product_id && g.tier_name === ontop.tier_name);
+          if (existingGift) existingGift.qty += qtyToAdd;
+          else finalGifts.push({ ...ontop, qty: qtyToAdd });
+        }
       }
     }
     return finalGifts;
-  }, [eligibleTiersData, selectedTierCounts, cartTotal]);
+  }, [eligibleTiersData, selectedTierCounts, cartTotal, inventoryData]);
 
   const eligibleTiers = eligibleTiersData.eligibleNormalTiers;
 
@@ -815,6 +835,7 @@ export default function PGDashboard() {
       setBillImages([]);
       setBillPreviews([]);
       queryClient.invalidateQueries({ queryKey: ['todaySales'] }); 
+      queryClient.invalidateQueries({ queryKey: ['promo_and_inventory'] }); 
     },
     onError: (error: any) => toast.error(`Lỗi: ${error.message}`)
   });
@@ -1150,7 +1171,14 @@ export default function PGDashboard() {
                     const selectedTotal = eligibleTiers
                       .reduce((sum, t) => sum + (selectedTierCounts[`${t.tier_name}_${t.min_total_qty}`] || 0) * t.min_total_qty, 0);
                     
-                    const canIncrease = (selectedTotal + tier.min_total_qty <= cartTotal);
+                    const stockInfo = tier.gifts.map((g: any) => {
+                      const inv = inventoryData.find((i: any) => i.product_id === g.product_id);
+                      const stock = inv ? inv.quantity : 0;
+                      return Math.floor(stock / g.qty);
+                    });
+                    const tierStock = stockInfo.length > 0 ? Math.min(...stockInfo) : 0;
+
+                    const canIncrease = (selectedTotal + tier.min_total_qty <= cartTotal) && (count < tierStock);
 
                     return (
                       <div 
@@ -1168,6 +1196,10 @@ export default function PGDashboard() {
                             Giá trị: {new Intl.NumberFormat('vi-VN').format(tier.min_total_qty)}đ
                             <span className="mx-2 text-gray-300">|</span>
                             {tier.gifts.length} loại quà
+                            <span className="mx-2 text-gray-300">|</span>
+                            <span className="text-gray-500">
+                              Tồn: {tierStock}
+                            </span>
                           </div>
                         </div>
 
@@ -1195,6 +1227,8 @@ export default function PGDashboard() {
                             onClick={() => {
                               if (canIncrease) {
                                 setSelectedTierCounts({ ...selectedTierCounts, [key]: count + 1 });
+                              } else if (count >= tierStock) {
+                                toast.error('Không đủ số lượng quà tồn kho!');
                               } else {
                                 toast.error('Hóa đơn không đủ ngân sách để thêm gói quà này!');
                               }
