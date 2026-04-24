@@ -174,15 +174,23 @@ export default function PGDashboard() {
         .select('*')
         .eq('item_type', 'Quà tặng');
       
-      const normalProducts = (productsData || []).map((p: any) => ({
-        product_id: p.product_id,
-        product_name: p.product_name || p.product_group?.name,
-        product_group_name: p.product_group?.name || '',
-        value: p.value || 0,
-        item_type: p.item_type,
-        brand_name: p.product_group?.brands?.brand_name || '',
-        category_name: p.product_group?.brands?.categories?.name || '',
-      }));
+      const getRel = (val: any) => Array.isArray(val) ? val[0] : val;
+
+      const normalProducts = (productsData || []).map((p: any) => {
+        const pg = getRel(p.product_group);
+        const br = getRel(pg?.brands);
+        const cat = getRel(br?.categories);
+        
+        return {
+          product_id: p.product_id,
+          product_name: p.product_name || pg?.name,
+          product_group_name: pg?.name || '',
+          value: p.value || 0,
+          item_type: p.item_type,
+          brand_name: br?.brand_name || '',
+          category_name: cat?.name || '',
+        };
+      });
 
       const giftProducts = (giftProductsData || []).map((p: any) => ({
         product_id: p.product_id,
