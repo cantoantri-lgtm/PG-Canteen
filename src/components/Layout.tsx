@@ -41,6 +41,7 @@ export default function Layout() {
     { name: 'Nhập đơn hàng bán', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
     { name: 'Báo cáo công việc', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
     { name: 'Báo cáo Chương trình', href: '/dashboard/admin/program-report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Báo cáo Tổng hợp (SUP)', href: '/dashboard/admin/sup-report', icon: FileText, category: 'Báo cáo' },
     { name: 'Hồ sơ cá nhân', href: '/dashboard/profile', icon: UserCircle, category: 'Cá nhân' },
   ];
 
@@ -53,6 +54,7 @@ export default function Layout() {
     { name: 'Đơn hàng', href: '/dashboard/admin/orders', icon: ShoppingCart, category: 'Đơn hàng' },
     { name: 'Báo cáo công việc', href: '/dashboard/report', icon: FileText, category: 'Báo cáo' },
     { name: 'Báo cáo Chương trình', href: '/dashboard/admin/program-report', icon: FileText, category: 'Báo cáo' },
+    { name: 'Báo cáo Tổng hợp (SUP)', href: '/dashboard/admin/sup-report', icon: FileText, category: 'Báo cáo' },
     { name: 'Hồ sơ cá nhân', href: '/dashboard/profile', icon: UserCircle, category: 'Cá nhân' },
   ];
 

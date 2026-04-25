@@ -326,9 +326,16 @@ export default function PGReport() {
               <select 
                 className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
                 value={selectedPgId}
-                onChange={(e) => setSelectedPgId(e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value === 'all') {
+                    window.location.href = '/dashboard/admin/sup-report';
+                  } else {
+                    setSelectedPgId(e.target.value);
+                  }
+                }}
               >
                 <option value="">-- Chọn nhân viên để xem --</option>
+                <option value="all" className="font-bold text-indigo-600">-- Tất cả PG (Báo cáo Tổng hợp) --</option>
                 {filteredProfiles.map(p => <option key={p.id} value={p.id}>{p.full_name}</option>)}
               </select>
             </div>

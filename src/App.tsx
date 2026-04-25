@@ -29,6 +29,7 @@ import Accounts from './pages/admin/Accounts';
 import Programs from './pages/admin/Programs';
 import Promotions from './pages/admin/Promotions';
 import Inventories from './pages/admin/Inventories';
+import SupReport from './pages/admin/SupReport';
 import { Toaster } from 'sonner';
 
 class ErrorBoundary extends Component<{children: ReactNode}, {hasError: boolean, error: Error | null}> {
@@ -106,6 +107,7 @@ export default function App() {
             <Route index element={<DashboardRouter />} />
             <Route path="profile" element={<Profile />} />
             <Route path="report" element={<PGReport />} />
+            <Route path="admin/sup-report" element={<ProtectedRoute requireAdmin allowSup><SupReport /></ProtectedRoute>} />
             <Route path="admin/program-report" element={<ProtectedRoute requireAdmin allowSup><ProgramReport /></ProtectedRoute>} />
             <Route path="admin/shops" element={<ProtectedRoute requireAdmin><Shops /></ProtectedRoute>} />
             <Route path="admin/shop-map" element={<ProtectedRoute requireAdmin><ShopMap /></ProtectedRoute>} />
