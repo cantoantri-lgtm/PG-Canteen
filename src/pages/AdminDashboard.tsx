@@ -45,6 +45,13 @@ export default function AdminDashboard() {
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = !isAdmin && (user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP');
 
+  const getGmt7DateStr = (dateVal: string | Date | number) => {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return '';
+    const gmt7Date = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    return gmt7Date.toISOString().split('T')[0];
+  };
+
   const [startDateInput, setStartDateInput] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
   const [selectedShopInput, setSelectedShopInput] = useState('');
@@ -303,16 +310,19 @@ export default function AdminDashboard() {
     const ordersByDay: Record<string, any[]> = {};
     filteredOrders.forEach(o => {
       if (!o.created_at) return;
-      const orderDate = new Date(o.created_at);
-      if (isNaN(orderDate.getTime())) return;
-      const dayStr = format(orderDate, 'yyyy-MM-dd');
+      const dayStr = getGmt7DateStr(o.created_at);
+      if (!dayStr) return;
       if (!ordersByDay[dayStr]) ordersByDay[dayStr] = [];
       ordersByDay[dayStr].push(o);
     });
 
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayStr = getGmt7DateStr(new Date());
 
     const dailyData = daysArray.map((day) => {
+      // For eachDayOfInterval, the date is local midnight. But if we want local day format, we can just use format.
+      // Wait, we need it to match dayStr which is in VN timezone.
+      // If we use format, it uses local browser time. To be perfectly safe, `day` was generated using browser local time anyway
+      // So `format(day, 'yyyy-MM-dd')` is correct for `daysArray` elements!
       const dayStr = format(day, 'yyyy-MM-dd');
       const dailyOrders = ordersByDay[dayStr] || [];
       const dailyRevenue = dailyOrders.reduce((sum, o) => sum + Number(o.net_value || 0), 0);
@@ -396,7 +406,7 @@ export default function AdminDashboard() {
         const val = Number(order.net_value);
         pgMap[order.pg_id].sales += val;
         
-        const orderDate = order.created_at ? format(new Date(order.created_at), 'yyyy-MM-dd') : '';
+        const orderDate = order.created_at ? getGmt7DateStr(order.created_at) : '';
         if (orderDate === todayStr) {
           pgMap[order.pg_id].dailySales += val;
         }

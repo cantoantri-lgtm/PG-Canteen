@@ -12,6 +12,13 @@ import {
 const getRel = (val: any) => Array.isArray(val) ? val[0] : val;
 const COLORS = ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#60a5fa', '#f472b6', '#fb923c'];
 
+const getGmt7DateStr = (dateVal: string | Date | number) => {
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '';
+  const gmt7Date = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+  return gmt7Date.toISOString().split('T')[0];
+};
+
 export default function SupReport() {
   const { user } = useAuth();
   
@@ -132,7 +139,7 @@ export default function SupReport() {
   const reportData = useMemo(() => {
     if (!orders.length) return null;
 
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayStr = getGmt7DateStr(new Date());
     let todaySales = 0;
     let totalSales = 0;
 
@@ -142,7 +149,7 @@ export default function SupReport() {
     const productSalesMap = new Map();
 
     orders.forEach(o => {
-      const orderDateStr = format(new Date(o.created_at), 'yyyy-MM-dd');
+      const orderDateStr = getGmt7DateStr(o.created_at);
       if (orderDateStr === todayStr) {
         todaySales += o.net_value;
       }
