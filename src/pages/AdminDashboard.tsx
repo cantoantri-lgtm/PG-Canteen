@@ -43,7 +43,7 @@ export default function AdminDashboard() {
                   user?.role_id === 'admin' || 
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
-  const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
+  const isSup = !isAdmin && (user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP');
 
   const [startDateInput, setStartDateInput] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
@@ -129,10 +129,10 @@ export default function AdminDashboard() {
     queryKey: ['orders', appliedFilters.startDate, appliedFilters.endDate, user?.id, isSup, authLoading],
     queryFn: async () => {
       if (authLoading) return [];
-      const start = new Date(appliedFilters.startDate);
-      start.setHours(0, 0, 0, 0);
-      const end = new Date(appliedFilters.endDate);
-      end.setHours(23, 59, 59, 999);
+      // start of day in Vietnam timezone
+      const startIso = new Date(`${appliedFilters.startDate}T00:00:00+07:00`).toISOString();
+      // end of day in Vietnam timezone
+      const endIso = new Date(`${appliedFilters.endDate}T23:59:59+07:00`).toISOString();
 
       let query = supabase
         .from('order_details')
@@ -144,8 +144,8 @@ export default function AdminDashboard() {
             profiles!inner(full_name, manager_id)
           )
         `)
-        .gte('orders.created_at', start.toISOString())
-        .lte('orders.created_at', end.toISOString());
+        .gte('orders.created_at', startIso)
+        .lte('orders.created_at', endIso);
 
       if (isSup && user?.id) {
         const { data: assignedPrograms } = await supabase
@@ -170,18 +170,26 @@ export default function AdminDashboard() {
       }
       
       // Flatten or map the data for easier use in the dashboard
-      return (data || []).map(item => ({
-        ...item,
-        cart_id: item.orders.cart_id,
-        created_at: item.orders.created_at,
-        pg_id: item.orders.pg_id,
-        program_id: item.orders.program_id,
-        shop_id: item.orders.shop_id,
-        customer_name: item.orders.customer_name,
-        customer_phone: item.orders.customer_phone,
-        full_name: item.orders.profiles?.full_name,
-        manager_id: item.orders.profiles?.manager_id
-      }));
+      return (data || []).map(item => {
+        const orderRel = Array.isArray(item.orders) ? item.orders[0] : item.orders;
+        const profileRel = orderRel?.profiles ? (Array.isArray(orderRel.profiles) ? orderRel.profiles[0] : orderRel.profiles) : null;
+        const productRel = Array.isArray(item.products) ? item.products[0] : item.products;
+        return {
+          ...item,
+          cart_id: orderRel?.cart_id,
+          created_at: orderRel?.created_at,
+          pg_id: orderRel?.pg_id,
+          program_id: orderRel?.program_id,
+          shop_id: orderRel?.shop_id,
+          customer_name: orderRel?.customer_name,
+          customer_phone: orderRel?.customer_phone,
+          full_name: profileRel?.full_name,
+          manager_id: profileRel?.manager_id,
+          brand_id: productRel?.brand_id,
+          product_name: productRel?.product_name,
+          product_group_id: productRel?.product_group_id
+        };
+      });
     },
     retry: false,
     enabled: !authLoading
@@ -233,7 +241,7 @@ export default function AdminDashboard() {
     }
     
     const { managerId, shopId: filterShopId } = appliedFilters;
-
+    
     let activePgIds = masterData.profiles.filter(p => !p.admin_role).map(p => p.id);
     
     if (managerId) {
@@ -241,18 +249,30 @@ export default function AdminDashboard() {
         const pg = masterData.profiles.find(p => p.id === id);
         return pg?.manager_id === managerId;
       });
+      filteredOrders = filteredOrders.filter(o => o.manager_id === managerId);
     }
 
     if (filterShopId) {
       const shopPgIds = masterData.schedules.filter(s => s.shop_id === filterShopId).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => shopPgIds.includes(id));
+      filteredOrders = filteredOrders.filter(o => o.shop_id === filterShopId);
+      const actualSalesPgIds = Array.from(new Set(filteredOrders.map(o => o.pg_id)));
+      for (const p of actualSalesPgIds) {
+        if (!activePgIds.includes(p)) activePgIds.push(p);
+      }
     }
-
+    
     if (programId) {
       const programPgIds = masterData.schedules.filter(s => s.program_id === programId).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => programPgIds.includes(id));
+      // Add back any PGs who actually have sales for this program regardless of schedules!
+      const actualSalesPgIds = Array.from(new Set(filteredOrders.map(o => o.pg_id)));
+      for (const p of actualSalesPgIds) {
+        if (!activePgIds.includes(p)) activePgIds.push(p);
+      }
     }
-    
+
+    // Include orders only from active PGs! (to match target computations)
     filteredOrders = filteredOrders.filter(o => activePgIds.includes(o.pg_id));
 
     const uniqueOrderIds = new Set(filteredOrders.map(o => o.cart_id));
@@ -283,20 +303,26 @@ export default function AdminDashboard() {
     let cumulativeRevenue = 0;
     let cumulativeIdeal = 0;
 
+    const getGmt7DateStr = (dateVal: string | Date | number) => {
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return '';
+      const gmt7Date = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+      return gmt7Date.toISOString().split('T')[0];
+    };
+
     const ordersByDay: Record<string, any[]> = {};
     filteredOrders.forEach(o => {
       if (!o.created_at) return;
-      const orderDate = new Date(o.created_at);
-      if (isNaN(orderDate.getTime())) return;
-      const dayStr = format(orderDate, 'yyyy-MM-dd');
+      const dayStr = getGmt7DateStr(o.created_at);
+      if (!dayStr) return;
       if (!ordersByDay[dayStr]) ordersByDay[dayStr] = [];
       ordersByDay[dayStr].push(o);
     });
 
-    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const todayStr = getGmt7DateStr(new Date());
 
     const dailyData = daysArray.map((day) => {
-      const dayStr = format(day, 'yyyy-MM-dd');
+      const dayStr = getGmt7DateStr(day);
       const dailyOrders = ordersByDay[dayStr] || [];
       const dailyRevenue = dailyOrders.reduce((sum, o) => sum + Number(o.net_value || 0), 0);
       
@@ -379,7 +405,7 @@ export default function AdminDashboard() {
         const val = Number(order.net_value);
         pgMap[order.pg_id].sales += val;
         
-        const orderDate = order.created_at ? format(new Date(order.created_at), 'yyyy-MM-dd') : '';
+        const orderDate = order.created_at ? getGmt7DateStr(order.created_at) : '';
         if (orderDate === todayStr) {
           pgMap[order.pg_id].dailySales += val;
         }
@@ -551,6 +577,13 @@ export default function AdminDashboard() {
             {masterData?.shops
               .filter(s => !selectedProgramInput || masterData.schedules.some(sch => sch.shop_id === s.shop_id && sch.program_id === selectedProgramInput))
               .map(s => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
+          </select>
+        </div>
+        <div className="w-full">
+          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Chương trình</label>
+          <select value={selectedProgramInput} onChange={e => setSelectedProgramInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
+            <option value="">-- Tất cả Chương trình --</option>
+            {masterData?.programs.map(p => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
           </select>
         </div>
         <div className="w-full">

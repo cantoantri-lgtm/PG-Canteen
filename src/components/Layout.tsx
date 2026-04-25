@@ -46,7 +46,7 @@ export default function Layout() {
   ];
 
   const supNavigation = [
-    { name: 'Bảng điều khiển', href: '/dashboard', icon: LayoutDashboard, category: 'Main' },
+    { name: 'Bảng điều khiển', href: '/dashboard/admin/sup-report', icon: LayoutDashboard, category: 'Main' },
     { name: 'Quản lý PG', href: '/dashboard/admin/profiles', icon: Users, category: 'Người dùng' },
     { name: 'Tồn kho', href: '/dashboard/admin/inventories', icon: Package, category: 'Sản phẩm, Thương hiệu, Tồn kho' },
     { name: 'Chương trình', href: '/dashboard/admin/programs', icon: Target, category: 'Hoạt động' },

@@ -84,7 +84,14 @@ const DashboardRouter = () => {
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
-  return (isAdmin || isSup) ? <AdminDashboard /> : <PGDashboard />;
+  
+  if (isAdmin) {
+    return <AdminDashboard />;
+  } else if (isSup) {
+    return <Navigate to="/dashboard/admin/sup-report" />;
+  } else {
+    return <PGDashboard />;
+  }
 };
 
 export default function App() {

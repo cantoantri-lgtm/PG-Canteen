@@ -19,6 +19,7 @@ export default function SupReport() {
   const [endDate, setEndDate] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
 
   const [selectedManagerId, setSelectedManagerId] = useState<string>('');
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('');
 
   const { data: allProfiles = [] } = useQuery({
     queryKey: ['all_profiles'],
@@ -32,6 +33,14 @@ export default function SupReport() {
     queryKey: ['roles'],
     queryFn: async () => {
       const { data } = await supabase.from('roles').select('*');
+      return data || [];
+    }
+  });
+
+  const { data: programs = [] } = useQuery({
+    queryKey: ['programs'],
+    queryFn: async () => {
+      const { data } = await supabase.from('programs').select('program_id, program_name').order('program_name');
       return data || [];
     }
   });
@@ -66,23 +75,29 @@ export default function SupReport() {
   const managedPgIds = managedPGs.map(p => p.id);
 
   const { data: orders = [], isLoading } = useQuery({
-    queryKey: ['sup_report_orders', managedPgIds, startDate, endDate],
+    queryKey: ['sup_report_orders', managedPgIds, startDate, endDate, selectedProgramId],
     queryFn: async () => {
       if (managedPgIds.length === 0) return [];
       
-      const { data, error } = await supabase
+      let query = supabase
         .from('order_details')
         .select(`
           id, qty, net_value, switched_from_brand,
-          orders!inner(cart_id, created_at, pg_id),
+          orders!inner(cart_id, created_at, pg_id, program_id),
           products(
             product_name,
             product_group!inner(name)
           )
         `)
         .in('orders.pg_id', managedPgIds)
-        .gte('orders.created_at', `${startDate}T00:00:00.000Z`)
-        .lte('orders.created_at', `${endDate}T23:59:59.999Z`);
+        .gte('orders.created_at', new Date(`${startDate}T00:00:00+07:00`).toISOString())
+        .lte('orders.created_at', new Date(`${endDate}T23:59:59+07:00`).toISOString());
+        
+      if (selectedProgramId) {
+        query = query.eq('orders.program_id', selectedProgramId);
+      }
+        
+      const { data, error } = await query;
         
       if (error) throw error;
       
@@ -179,7 +194,7 @@ export default function SupReport() {
       </div>
 
       <div className="bg-white shadow rounded-lg p-6 border border-gray-200">
-        <div className={`grid grid-cols-1 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4 mb-6`}>
+        <div className={`grid grid-cols-1 ${isAdmin ? 'md:grid-cols-4' : 'md:grid-cols-3'} gap-4 mb-6`}>
           {isAdmin && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Quản lý (SUP)</label>
@@ -193,6 +208,17 @@ export default function SupReport() {
               </select>
             </div>
           )}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Chương trình</label>
+            <select 
+              className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+              value={selectedProgramId}
+              onChange={(e) => setSelectedProgramId(e.target.value)}
+            >
+              <option value="">-- Tất cả Chương trình --</option>
+              {programs.map(p => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
+            </select>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Từ ngày</label>
             <input 
@@ -248,7 +274,7 @@ export default function SupReport() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Biểu đồ cột đứng xếp hạng PG */}
+              {/* Biểu đồ cột ngang xếp hạng PG */}
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[350px]">
                 <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2 uppercase">
                   <Users className="w-4 h-4 text-indigo-500" />
@@ -256,18 +282,18 @@ export default function SupReport() {
                 </h3>
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={reportData.pgRanking} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
+                    <BarChart layout="vertical" data={reportData.pgRanking} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                      <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} width={80} />
                       <RechartsTooltip formatter={(value: number) => [new Intl.NumberFormat('vi-VN').format(value) + 'đ', 'Doanh số']} cursor={{fill: '#f3f4f6'}} />
-                      <Bar dataKey="sales" fill="#818cf8" radius={[4, 4, 0, 0]} barSize={40} />
+                      <Bar dataKey="sales" fill="#818cf8" radius={[0, 4, 4, 0]} barSize={20} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
-              {/* Biểu đồ cột ngang (Lịch sử theo ngày) */}
+              {/* Biểu đồ cột đứng (Lịch sử theo ngày) */}
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[350px]">
                 <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2 uppercase">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
@@ -275,12 +301,12 @@ export default function SupReport() {
                 </h3>
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart layout="vertical" data={reportData.dateData} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
-                      <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
-                      <YAxis dataKey="date" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} width={45} />
+                    <BarChart data={reportData.dateData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
+                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
                       <RechartsTooltip formatter={(value: number) => [new Intl.NumberFormat('vi-VN').format(value) + 'đ', 'Doanh số']} cursor={{fill: '#f3f4f6'}} />
-                      <Bar dataKey="sales" fill="#34d399" radius={[0, 4, 4, 0]} barSize={16} />
+                      <Bar dataKey="sales" fill="#34d399" radius={[4, 4, 0, 0]} barSize={40} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

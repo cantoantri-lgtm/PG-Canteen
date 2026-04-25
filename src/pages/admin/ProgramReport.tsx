@@ -47,10 +47,13 @@ export default function ProgramReport() {
     queryFn: async () => {
       if (authLoading || !selectedProgramId) return [];
       
-      const date = new Date(selectedDate);
-      const start = startOfMonth(date).toISOString();
-      const end = endOfMonth(date).toISOString();
-
+      const [year, month] = selectedDate.split('-');
+      // Start is the 1st of the month
+      const startStr = `${year}-${month}-01T00:00:00+07:00`;
+      // Find the last day of the month
+      const lastDay = new Date(Number(year), Number(month), 0).getDate();
+      const endStr = `${year}-${month}-${lastDay}T23:59:59+07:00`;
+      
       const { data, error } = await supabase
         .from('order_details')
         .select(`
@@ -67,8 +70,8 @@ export default function ProgramReport() {
           )
         `)
         .eq('orders.program_id', selectedProgramId)
-        .gte('orders.created_at', start)
-        .lte('orders.created_at', end);
+        .gte('orders.created_at', new Date(startStr).toISOString())
+        .lte('orders.created_at', new Date(endStr).toISOString());
         
       if (error) throw error;
       
@@ -113,7 +116,10 @@ export default function ProgramReport() {
 
     const programName = programs.find(p => p.program_id === selectedProgramId)?.program_name || 'Không xác định';
 
-    const dailyOrders = orders.filter(o => o.created_at.startsWith(selectedDate));
+    const dailyOrders = orders.filter(o => {
+      const localDateStr = format(new Date(o.created_at), 'yyyy-MM-dd');
+      return localDateStr === selectedDate;
+    });
     const uniqueCarts = new Set(dailyOrders.map(o => o.cart_id)).size;
     const dailyTotalAmount = dailyOrders.reduce((sum, o) => sum + Number(o.net_value), 0);
     
