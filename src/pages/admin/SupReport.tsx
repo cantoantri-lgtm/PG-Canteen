@@ -45,6 +45,14 @@ export default function SupReport() {
     }
   });
 
+  const { data: shops = [] } = useQuery({
+    queryKey: ['shops'],
+    queryFn: async () => {
+      const { data } = await supabase.from('shops').select('shop_id, shop_name');
+      return data || [];
+    }
+  });
+
   const { isAdmin, isSup } = useMemo(() => {
     const matchedRole = roles.find(r => r.role_id === user?.role_id);
     const roleName = (matchedRole?.role_name || '').toUpperCase();
@@ -83,7 +91,7 @@ export default function SupReport() {
         .from('order_details')
         .select(`
           id, qty, net_value, switched_from_brand,
-          orders!inner(cart_id, created_at, pg_id, program_id),
+          orders!inner(cart_id, created_at, pg_id, program_id, shop_id),
           products(
             product_name,
             product_group!inner(name)
@@ -112,6 +120,7 @@ export default function SupReport() {
           net_value: Number(item.net_value) || 0,
           created_at: order?.created_at,
           pg_id: order?.pg_id,
+          shop_id: order?.shop_id,
           product_name: product?.product_name || 'Không xác định',
           group_name: productGroup?.name || 'Không xác định',
         };
@@ -127,7 +136,7 @@ export default function SupReport() {
     let todaySales = 0;
     let totalSales = 0;
 
-    const pgSalesMap = new Map();
+    const shopSalesMap = new Map();
     const dateSalesMap = new Map();
     const groupSalesMap = new Map();
     const productSalesMap = new Map();
@@ -139,9 +148,9 @@ export default function SupReport() {
       }
       totalSales += o.net_value;
 
-      // PG Sales
-      const pgName = managedPGs.find(p => p.id === o.pg_id)?.full_name || 'Không xác định';
-      pgSalesMap.set(pgName, (pgSalesMap.get(pgName) || 0) + o.net_value);
+      // Shop Sales
+      const shopName = shops.find(s => s.shop_id === o.shop_id)?.shop_name || 'Không xác định';
+      shopSalesMap.set(shopName, (shopSalesMap.get(shopName) || 0) + o.net_value);
 
       // Date Sales
       dateSalesMap.set(orderDateStr, (dateSalesMap.get(orderDateStr) || 0) + o.net_value);
@@ -160,7 +169,7 @@ export default function SupReport() {
       item.amount += o.net_value;
     });
 
-    const pgRanking = Array.from(pgSalesMap.entries())
+    const shopRanking = Array.from(shopSalesMap.entries())
       .map(([name, sales]) => ({ name, sales }))
       .sort((a, b) => b.sales - a.sales);
 
@@ -178,12 +187,12 @@ export default function SupReport() {
     return {
       todaySales,
       totalSales,
-      pgRanking,
+      shopRanking,
       dateData,
       groupData,
       productRanking
     };
-  }, [orders, managedPGs]);
+  }, [orders, shops]);
 
   if (!isAdmin && !isSup) return <div className="p-10 text-center font-medium text-gray-500">Bạn không có quyền truy cập trang này.</div>;
 
@@ -274,15 +283,15 @@ export default function SupReport() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Biểu đồ cột ngang xếp hạng PG */}
+              {/* Biểu đồ cột ngang xếp hạng Shop */}
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[350px]">
                 <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2 uppercase">
-                  <Users className="w-4 h-4 text-indigo-500" />
-                  Xếp hạng doanh số PG
+                  <BarChart3 className="w-4 h-4 text-indigo-500" />
+                  Xếp hạng doanh số Cửa hàng
                 </h3>
                 <div className="h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart layout="vertical" data={reportData.pgRanking} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                    <BarChart layout="vertical" data={reportData.shopRanking} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
                       <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
                       <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} width={80} />

@@ -256,20 +256,17 @@ export default function AdminDashboard() {
       const shopPgIds = masterData.schedules.filter(s => s.shop_id === filterShopId).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => shopPgIds.includes(id));
       filteredOrders = filteredOrders.filter(o => o.shop_id === filterShopId);
-      const actualSalesPgIds = Array.from(new Set(filteredOrders.map(o => o.pg_id)));
-      for (const p of actualSalesPgIds) {
-        if (!activePgIds.includes(p)) activePgIds.push(p);
-      }
     }
     
     if (programId) {
       const programPgIds = masterData.schedules.filter(s => s.program_id === programId).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => programPgIds.includes(id));
-      // Add back any PGs who actually have sales for this program regardless of schedules!
-      const actualSalesPgIds = Array.from(new Set(filteredOrders.map(o => o.pg_id)));
-      for (const p of actualSalesPgIds) {
-        if (!activePgIds.includes(p)) activePgIds.push(p);
-      }
+    }
+
+    // Always ensure PGs who have actual sales are added back (e.g. admins testing, or unscheduled sales)
+    const actualSalesPgIds = Array.from(new Set(filteredOrders.map(o => o.pg_id)));
+    for (const p of actualSalesPgIds) {
+      if (!activePgIds.includes(p)) activePgIds.push(p);
     }
 
     // Include orders only from active PGs! (to match target computations)
@@ -303,26 +300,20 @@ export default function AdminDashboard() {
     let cumulativeRevenue = 0;
     let cumulativeIdeal = 0;
 
-    const getGmt7DateStr = (dateVal: string | Date | number) => {
-      const d = new Date(dateVal);
-      if (isNaN(d.getTime())) return '';
-      const gmt7Date = new Date(d.getTime() + 7 * 60 * 60 * 1000);
-      return gmt7Date.toISOString().split('T')[0];
-    };
-
     const ordersByDay: Record<string, any[]> = {};
     filteredOrders.forEach(o => {
       if (!o.created_at) return;
-      const dayStr = getGmt7DateStr(o.created_at);
-      if (!dayStr) return;
+      const orderDate = new Date(o.created_at);
+      if (isNaN(orderDate.getTime())) return;
+      const dayStr = format(orderDate, 'yyyy-MM-dd');
       if (!ordersByDay[dayStr]) ordersByDay[dayStr] = [];
       ordersByDay[dayStr].push(o);
     });
 
-    const todayStr = getGmt7DateStr(new Date());
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
 
     const dailyData = daysArray.map((day) => {
-      const dayStr = getGmt7DateStr(day);
+      const dayStr = format(day, 'yyyy-MM-dd');
       const dailyOrders = ordersByDay[dayStr] || [];
       const dailyRevenue = dailyOrders.reduce((sum, o) => sum + Number(o.net_value || 0), 0);
       
@@ -405,7 +396,7 @@ export default function AdminDashboard() {
         const val = Number(order.net_value);
         pgMap[order.pg_id].sales += val;
         
-        const orderDate = order.created_at ? getGmt7DateStr(order.created_at) : '';
+        const orderDate = order.created_at ? format(new Date(order.created_at), 'yyyy-MM-dd') : '';
         if (orderDate === todayStr) {
           pgMap[order.pg_id].dailySales += val;
         }
