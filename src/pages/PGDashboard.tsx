@@ -792,6 +792,7 @@ export default function PGDashboard() {
       // 4. Chuẩn bị Header
       const header = {
         cart_id: finalCartId,
+        created_at: new Date().toISOString(),
         pg_id: user?.id,
         program_id: programId,
         shop_id: selectedShopId,
