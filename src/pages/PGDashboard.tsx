@@ -3,7 +3,6 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { GoogleGenAI, Type } from '@google/genai';
 import { Link } from 'react-router-dom';
 import { Camera, Check, X, FileText, UserCircle, Gift, BarChart3, Plus, Minus, ImagePlus } from 'lucide-react';
 import clsx from 'clsx';

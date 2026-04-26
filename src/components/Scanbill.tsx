@@ -1,9 +1,9 @@
 import React, { useState, useRef } from 'react';
 import { Camera, ImagePlus } from 'lucide-react';
-import { GoogleGenAI, Type } from '@google/genai';
 import { toast } from 'sonner';
 import { matchProduct } from '../services/ocrLearningService';
 import imageCompression from 'browser-image-compression';
+import Tesseract from 'tesseract.js';
 
 interface Product {
   product_id: string;
@@ -48,124 +48,154 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState('');
 
+  // 1. LOCAL OCR FUNCTION
+  const localExtractText = async (imageFile: File): Promise<string> => {
+    try {
+      setScanStatus('Khởi tạo AI Local (Tesseract)...');
+      
+      const result = await Tesseract.recognize(
+        imageFile,
+        'vie',
+        {
+          logger: m => {
+            if (m.status === 'recognizing text') {
+              // Tesseract progress goes from 0 to 1
+              setScanProgress(Math.floor(m.progress * 30));
+            }
+          }
+        }
+      );
+      
+      return result.data.text;
+    } catch (err) {
+      console.error('Local OCR Error:', err);
+      // Trả về chuỗi rỗng để hệ thống kích hoạt Fallback Cloud AI thay vì sập
+      return ''; 
+    }
+  };
+
   const processBillFile = async (file: File) => {
     setIsScanning(true);
     setScanProgress(5);
     setScanStatus('Đang nén ảnh...');
     
-    let progressInterval: NodeJS.Timeout;
+    let progressInterval: NodeJS.Timeout | null = null;
 
     try {
-      // 1. Nén ảnh ở máy khách
+      // Nén ảnh ở máy khách
       const options = {
         maxSizeMB: 1,
-        maxWidthOrHeight: 1920,
+        maxWidthOrHeight: 1200, // Reduced for faster local OCR
         useWebWorker: true
       };
       let compressedFile: File;
       try {
         compressedFile = await imageCompression(file, options);
       } catch (compressError) {
-        console.warn('Lỗi nén ảnh, sử dụng ảnh gốc:', compressError);
         compressedFile = file;
       }
-      
-      setScanProgress(30);
-      setScanStatus('Đang phân tích dữ liệu...');
 
-      const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
-      const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn, Khăn ướt, Bông tẩy trang';
+      setScanProgress(10);
+      setScanStatus('Đang quét nhanh tại Local...');
 
-      let items = [];
+      // BƯỚC 1: Gọi Local OCR để trích xuất text
+      const rawText = await localExtractText(compressedFile);
+      const lines = rawText.split('\\n').map(l => l.trim()).filter(Boolean);
 
-      if (items.length === 0) {
-        // Gọi Gemini API
-        progressInterval = setInterval(() => {
-          setScanProgress(prev => {
-            if (prev < 70) {
-              setScanStatus('AI đang đọc dữ liệu...');
-              return prev + 3;
-            } else if (prev < 95) {
-              setScanStatus('Đang trích xuất sản phẩm...');
-              return prev + 1;
-            }
-            return prev;
-          });
-        }, 400);
+      // BƯỚC 2: Matching cơ bản tại Local
+      let localMatchedItems: any[] = [];
+      let maxConfidence = 0;
 
-        const reader = new FileReader();
-        reader.readAsDataURL(compressedFile);
-        await new Promise((resolve) => (reader.onload = resolve));
-        const base64Data = (reader.result as string).split(',')[1];
-
-        const apiKey = import.meta.env.VITE_GOOGLE_API_KEY || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || "AIzaSyD2dAXp28io3QlkK0t1hIAAGKPoD7qhyq0";
-        if (!apiKey || apiKey === "") {
-          toast.error('Lỗi cấu hình: Không tìm thấy API Key. Vui lòng kiểm tra lại cấu hình.');
-          if (progressInterval) clearInterval(progressInterval);
-          setIsScanning(false);
-          return;
-        }
-        const ai = new GoogleGenAI({ apiKey });
+      // Logic quét đơn giản (Ví dụ minh họa, duyệt qua từng dòng)
+      const keywordToProductMatch = (line: string) => {
+        let bestMatch: Product | null = null;
+        let score = 0;
         
-        const promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
-
-NHIỆM VỤ: 
-Trích xuất TẤT CẢ các sản phẩm có trên hóa đơn.
-Với mỗi sản phẩm, hãy phân loại xem nó thuộc ngành hàng nào trong danh sách sau: [${categoryList}]. Nếu không thuộc ngành hàng nào trong danh sách, hãy xếp vào loại "Khác".
-
-HƯỚNG DẪN BÓC TÁCH GIÁ (CRITICAL):
-Phải lấy đúng ĐƠN GIÁ (Unit Price) của 1 sản phẩm. KHÔNG lấy Thành tiền.
-Cấu trúc hóa đơn thường hiển thị theo cặp dòng: 
-- Dòng trên: [Tên Sản Phẩm]
-- Dòng dưới: [Số lượng]      [Đơn giá]      [Thành tiền]
-
-ĐỊNH DẠNG ĐẦU RA:
-Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), 'qty' (số lượng), 'unit_price' (đơn giá), và 'category' (ngành hàng).`;
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  data: base64Data,
-                  mimeType: compressedFile.type || 'image/jpeg',
-                }
-              },
-              { text: promptText }
-            ]
-          },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  raw_name: { type: Type.STRING },
-                  qty: { type: Type.NUMBER },
-                  unit_price: { type: Type.NUMBER },
-                  category: { type: Type.STRING }
-                }
-              }
+        products.forEach(p => {
+          const pNameLower = p.product_name.toLowerCase();
+          const lineLower = line.toLowerCase();
+          // Nếu dòng chứa tên sản phẩm
+          if (lineLower.includes(pNameLower)) {
+            let currentScore = pNameLower.length; 
+            if (currentScore > score) {
+              score = currentScore;
+              bestMatch = p;
             }
           }
         });
+        
+        return bestMatch ? { product: bestMatch, score } : null;
+      };
 
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const match = keywordToProductMatch(line);
+        if (match) {
+          if (match.score > maxConfidence) maxConfidence = match.score;
+          // Cố gắng tìm giá ở dòng tiếp theo bằng regex
+          let price = match.product.value; // Mac dinh la gia goc
+          if (i + 1 < lines.length) {
+            const nextLine = lines[i+1];
+            // Tim cac chu so ex: "1 25.000 25.000"
+            const numMatches = nextLine.match(/\\d+[.,\\s]*\\d*/g);
+            if (numMatches && numMatches.length >= 2) {
+              const possiblePrice = parseInt(numMatches[1].replace(/\\D/g, ''));
+              if (possiblePrice > 1000) price = possiblePrice;
+            }
+          }
+          localMatchedItems.push({
+            raw_name: line,
+            qty: 1,
+            unit_price: price,
+            category: match.product.category_name || 'Khác'
+          });
+        }
+      }
+
+      let items = [];
+
+      // BƯỚC 3: Logic Fallback (Nếu Local không tìm thấy hoặc ko đủ tự tin)
+      if (localMatchedItems.length > 0 && maxConfidence > 5) {
+        setScanStatus('Đã tìm thấy bằng Local AI!');
+        setScanProgress(100);
+        items = localMatchedItems;
+        console.log("Local Matching Success:", items);
+      } else {
+        // BƯỚC 4: Fallback Cloud AI (Gửi Request lên Backend)
+        setScanStatus('Local AI không đủ dữ liệu. Gửi lên Cloud AI...');
+        setScanProgress(40);
+        
+        progressInterval = setInterval(() => {
+          setScanProgress(prev => {
+            if (prev < 90) return prev + 2;
+            return prev;
+          });
+        }, 300);
+
+        const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
+        const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn';
+
+        // GỌI BACKEND TẠI ĐÂY
+        const res = await fetch('/api/v1/scan-bill', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rawText: rawText,
+            categoryList
+          })
+        });
+
+          if (!res.ok) {
+          const errData = await res.json().catch(() => null);
+          throw new Error(errData?.error || `Lỗi Server HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        items = data.items || [];
+        
         if (progressInterval) clearInterval(progressInterval);
         setScanProgress(100);
-        setScanStatus('Hoàn tất!');
-
-        let responseText = response.text || '[]';
-        // Clean markdown formatting if present
-        responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-        
-        try {
-          items = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error('Lỗi parse JSON từ Gemini:', parseError, responseText);
-          throw new Error('Không thể đọc dữ liệu từ AI. Vui lòng thử lại.');
-        }
+        setScanStatus('Cloud AI xử lý hoàn tất!');
       }
       
       if (items.length === 0) {
@@ -176,15 +206,15 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
 
       const newCartItems: CartItem[] = [];
       const newPendingItems: PendingOcrItem[] = [];
+      const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
 
       for (const item of items) {
         if (item.category === 'Khác' || !uniqueCategories.includes(item.category)) {
-          continue; // Bỏ qua không đúng ngành hàng
+          continue; 
         }
 
         const matchResult = matchProduct(item.raw_name, item.unit_price, products, productAliases);
 
-        // Lọc bỏ các gợi ý đã được xác nhận là sai 2 lần trở lên
         if (matchResult.product_id) {
           const isConfirmedError = ocrErrors.some(err => 
             err.raw_name.toLowerCase() === item.raw_name.trim().toLowerCase() && 
@@ -219,30 +249,21 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
             });
           }
         } else {
-          // SỬA LỖI 2 & 3: Xử lý mọi trường hợp còn lại (fuzzy_low, none) thay vì bỏ qua
           let suggestions = matchResult.suggestions || [];
-
-          // Nếu hàm matchProduct trả về mảng rỗng, tự động tính toán Top 10 dựa trên tên và giá
           if (suggestions.length === 0) {
-            const rawWords = item.raw_name.toLowerCase().split(/[ \-\+]+/); // Cắt chuỗi thành các từ
+            const rawWords = item.raw_name.toLowerCase().split(/[ \-\+]+/); 
             
             const scoredProducts = products.map(p => {
               let score = 0;
               const pName = p.product_name.toLowerCase();
-              
-              // 1. Cộng điểm nếu trùng từ khóa (ưu tiên từ khóa dài > 2 ký tự)
               rawWords.forEach(word => {
                 if (word.length > 2 && pName.includes(word)) score += 15;
               });
-
-              // 2. Trừ điểm nếu lệch giá (Càng lệch giá càng bị trừ nhiều điểm)
               const priceDiff = Math.abs(p.value - (item.unit_price || 0));
-              score -= (priceDiff / 5000); // Ví dụ: lệch 5k bị trừ 1 điểm
-
+              score -= (priceDiff / 5000); 
               return { ...p, score };
             });
 
-            // Lấy ra Top 10 sản phẩm có điểm số cao nhất
             suggestions = scoredProducts
               .sort((a, b) => b.score - a.score)
               .slice(0, 10)
@@ -253,11 +274,9 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
                 value: p.value
               }));
           } else {
-            // Đảm bảo suggestions trả về từ hàm lấy tối đa 10
             suggestions = suggestions.slice(0, 10);
           }
 
-          // Đẩy vào danh sách Pending để PG kiểm tra thủ công
           newPendingItems.push({
             original_name: item.raw_name,
             qty: item.qty || 1,
@@ -271,29 +290,17 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       onScanComplete(newCartItems, newPendingItems, file);
       setIsScanning(false);
       
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (galleryInputRef.current) galleryInputRef.current.value = '';
 
     } catch (error: any) {
       if (progressInterval) clearInterval(progressInterval);
       setIsScanning(false);
       console.error('Lỗi quét hóa đơn:', error);
+      toast.error(error.message || 'Lỗi khi quét hóa đơn. Vui lòng thử lại.');
       
-      const errorMsg = error.message || '';
-      if (errorMsg.includes('503') || errorMsg.includes('high demand') || errorMsg.includes('UNAVAILABLE')) {
-        toast.error('Server đang quá tải. Thử lại sau 5 giây', { duration: 5000 });
-      } else if (errorMsg.includes('429') || errorMsg.includes('quota') || errorMsg.includes('RESOURCE_EXHAUSTED')) {
-        toast.error('Hệ thống AI đã hết lượt xử lý. Vui lòng thử lại sau ít phút', { duration: 5000 });
-      } else if (errorMsg) {
-        toast.error(errorMsg);
-      } else {
-        toast.error('Lỗi khi quét hóa đơn. Vui lòng thử lại.');
-      }
-      
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (galleryInputRef.current) galleryInputRef.current.value = '';
     }
   };
 
