@@ -316,7 +316,8 @@ export default function AdminDashboard() {
       ordersByDay[dayStr].push(o);
     });
 
-    const todayStr = getGmt7DateStr(new Date());
+    const literalTodayStr = getGmt7DateStr(new Date());
+    const todayStr = endDateInput >= literalTodayStr ? literalTodayStr : endDateInput;
 
     const dailyData = daysArray.map((day) => {
       // For eachDayOfInterval, the date is local midnight. But if we want local day format, we can just use format.

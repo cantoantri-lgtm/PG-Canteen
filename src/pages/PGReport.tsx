@@ -12,6 +12,13 @@ import {
 // Hàm hỗ trợ an toàn: Tránh lỗi khi Supabase trả về Mảng thay vì Object
 const getRel = (val: any) => Array.isArray(val) ? val[0] : val;
 
+const getGmt7DateStr = (dateVal: string | Date | number) => {
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) return '';
+  const gmt7Date = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+  return gmt7Date.toISOString().split('T')[0];
+};
+
 interface KPI {
   kpi_id: string;
   start_date: string;
@@ -23,7 +30,7 @@ export default function PGReport() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   
-  const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedDate, setSelectedDate] = useState(getGmt7DateStr(new Date()));
   const [selectedPgId, setSelectedPgId] = useState<string>('');
   const [selectedManagerId, setSelectedManagerId] = useState<string>('');
   const [viewingBillUrl, setViewingBillUrl] = useState<string | null>(null);
@@ -171,7 +178,7 @@ export default function PGReport() {
     // ĐÃ FIX: Lọc chính xác ngày theo múi giờ địa phương (Tránh rớt đơn)
     const dailyOrders = orders.filter(o => {
       if (!o.created_at) return false;
-      const orderDateStr = format(new Date(o.created_at), 'yyyy-MM-dd');
+      const orderDateStr = getGmt7DateStr(o.created_at);
       return orderDateStr === selectedDate;
     });
     
@@ -234,7 +241,7 @@ export default function PGReport() {
       const dayStr = format(day, 'yyyy-MM-dd');
       const daySales = orders.filter(o => {
         if (!o.created_at) return false;
-        return format(new Date(o.created_at), 'yyyy-MM-dd') === dayStr;
+        return getGmt7DateStr(o.created_at) === dayStr;
       }).reduce((sum, o) => sum + o.net_value, 0);
 
       return {

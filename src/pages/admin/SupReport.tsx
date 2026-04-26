@@ -5,7 +5,7 @@ import { useAuth } from '../../lib/AuthContext';
 import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { BarChart3, PieChart as PieChartIcon, TrendingUp, Users } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, LabelList,
   PieChart, Pie, Cell, Legend
 } from 'recharts';
 
@@ -139,11 +139,13 @@ export default function SupReport() {
   const reportData = useMemo(() => {
     if (!orders.length) return null;
 
-    const todayStr = getGmt7DateStr(new Date());
+    const literalTodayStr = getGmt7DateStr(new Date());
+    const todayStr = endDate >= literalTodayStr ? literalTodayStr : endDate;
     let todaySales = 0;
     let totalSales = 0;
 
-    const shopSalesMap = new Map();
+    const shopSalesMapToday = new Map();
+    const shopSalesMapTotal = new Map();
     const dateSalesMap = new Map();
     const groupSalesMap = new Map();
     const productSalesMap = new Map();
@@ -157,7 +159,10 @@ export default function SupReport() {
 
       // Shop Sales
       const shopName = shops.find(s => s.shop_id === o.shop_id)?.shop_name || 'Không xác định';
-      shopSalesMap.set(shopName, (shopSalesMap.get(shopName) || 0) + o.net_value);
+      shopSalesMapTotal.set(shopName, (shopSalesMapTotal.get(shopName) || 0) + o.net_value);
+      if (orderDateStr === todayStr) {
+        shopSalesMapToday.set(shopName, (shopSalesMapToday.get(shopName) || 0) + o.net_value);
+      }
 
       // Date Sales
       dateSalesMap.set(orderDateStr, (dateSalesMap.get(orderDateStr) || 0) + o.net_value);
@@ -176,7 +181,11 @@ export default function SupReport() {
       item.amount += o.net_value;
     });
 
-    const shopRanking = Array.from(shopSalesMap.entries())
+    const shopRankingToday = Array.from(shopSalesMapToday.entries())
+      .map(([name, sales]) => ({ name, sales }))
+      .sort((a, b) => b.sales - a.sales);
+
+    const shopRankingTotal = Array.from(shopSalesMapTotal.entries())
       .map(([name, sales]) => ({ name, sales }))
       .sort((a, b) => b.sales - a.sales);
 
@@ -194,7 +203,8 @@ export default function SupReport() {
     return {
       todaySales,
       totalSales,
-      shopRanking,
+      shopRankingToday,
+      shopRankingTotal,
       dateData,
       groupData,
       productRanking
@@ -290,24 +300,50 @@ export default function SupReport() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Biểu đồ cột ngang xếp hạng Shop */}
-              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[350px]">
+              {/* Biểu đồ cột ngang xếp hạng Shop (Trong ngày) */}
+              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[550px]">
                 <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2 uppercase">
                   <BarChart3 className="w-4 h-4 text-indigo-500" />
-                  Xếp hạng doanh số Cửa hàng
+                  Xếp hạng Cửa hàng (Hôm nay)
                 </h3>
-                <div className="h-[300px] w-full">
+                <div className="h-[500px] w-full mt-2">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart layout="vertical" data={reportData.shopRanking} margin={{ top: 20, right: 30, left: 10, bottom: 5 }}>
+                    <BarChart layout="vertical" data={reportData.shopRankingToday} margin={{ top: 20, right: 60, left: 10, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
                       <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
-                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} width={80} />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={170} />
                       <RechartsTooltip formatter={(value: number) => [new Intl.NumberFormat('vi-VN').format(value) + 'đ', 'Doanh số']} cursor={{fill: '#f3f4f6'}} />
-                      <Bar dataKey="sales" fill="#818cf8" radius={[0, 4, 4, 0]} barSize={20} />
+                      <Bar dataKey="sales" fill="#818cf8" radius={[0, 4, 4, 0]} barSize={20}>
+                        <LabelList dataKey="sales" position="right" formatter={(val: number) => new Intl.NumberFormat('vi-VN').format(val)} style={{ fontSize: '10px', fill: '#6b7280' }} />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
+
+              {/* Biểu đồ cột ngang xếp hạng Shop (Từ ngày đến ngày) */}
+              <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[550px]">
+                <h3 className="text-sm font-bold text-gray-500 mb-4 flex items-center gap-2 uppercase">
+                  <BarChart3 className="w-4 h-4 text-green-500" />
+                  Xếp hạng Cửa hàng (Từ ngày đến ngày)
+                </h3>
+                <div className="h-[500px] w-full mt-2">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart layout="vertical" data={reportData.shopRankingTotal} margin={{ top: 20, right: 60, left: 10, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f0f0f0" />
+                      <XAxis type="number" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
+                      <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} width={170} />
+                      <RechartsTooltip formatter={(value: number) => [new Intl.NumberFormat('vi-VN').format(value) + 'đ', 'Doanh số']} cursor={{fill: '#f3f4f6'}} />
+                      <Bar dataKey="sales" fill="#34d399" radius={[0, 4, 4, 0]} barSize={20}>
+                        <LabelList dataKey="sales" position="right" formatter={(val: number) => new Intl.NumberFormat('vi-VN').format(val)} style={{ fontSize: '10px', fill: '#6b7280' }} />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
               {/* Biểu đồ cột đứng (Lịch sử theo ngày) */}
               <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm relative min-h-[350px]">
@@ -322,7 +358,9 @@ export default function SupReport() {
                       <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`} />
                       <RechartsTooltip formatter={(value: number) => [new Intl.NumberFormat('vi-VN').format(value) + 'đ', 'Doanh số']} cursor={{fill: '#f3f4f6'}} />
-                      <Bar dataKey="sales" fill="#34d399" radius={[4, 4, 0, 0]} barSize={40} />
+                      <Bar dataKey="sales" fill="#34d399" radius={[4, 4, 0, 0]} barSize={40}>
+                        <LabelList dataKey="sales" position="top" formatter={(val: number) => new Intl.NumberFormat('vi-VN').format(val)} style={{ fontSize: '10px', fill: '#6b7280' }} />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

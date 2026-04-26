@@ -86,8 +86,15 @@ export default function PGDashboard() {
   const [manualProductGroup, setManualProductGroup] = useState('');
   const [manualProductId, setManualProductId] = useState('');
 
+  const getGmt7DateStr = (dateVal: string | Date | number = new Date()) => {
+    const d = new Date(dateVal);
+    if (isNaN(d.getTime())) return '';
+    const gmt7Date = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    return gmt7Date.toISOString().split('T')[0];
+  };
+
   // Lấy chuỗi ngày YYYY-MM-DD theo giờ địa phương
-  const todayStr = new Date(new Date().getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+  const todayStr = getGmt7DateStr();
 
   // --- FETCH DATA TỪ DATABASE ---
 
@@ -241,7 +248,7 @@ export default function PGDashboard() {
       
       const dateObj = new Date();
       // Ensure we are in local timezone for todayStr
-      const todayStr = new Date(dateObj.getTime() - (dateObj.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+      const todayStr = getGmt7DateStr(dateObj);
       
       const startOfM = new Date(dateObj.getFullYear(), dateObj.getMonth(), 1).toISOString();
       const endOfM = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0, 23, 59, 59, 999).toISOString();
@@ -283,7 +290,7 @@ export default function PGDashboard() {
           monthlyTotalAmount += val;
           
           if (o?.created_at) {
-            const orderDateStr = new Date(new Date(o.created_at).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+            const orderDateStr = getGmt7DateStr(o.created_at);
             if (orderDateStr === todayStr) {
               dailyTotalAmount += val;
             }
