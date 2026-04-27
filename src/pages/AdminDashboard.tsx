@@ -12,6 +12,7 @@ import { ArrowUp, ArrowDown, Sparkles, Mail, CheckCircle2 } from 'lucide-react';
 import { PGDetailModal } from '../components/PGDetailModal';
 import { SmartReportModal } from '../components/SmartReportModal';
 import { useSmartReport } from '../hooks/useSmartReport';
+import Select from 'react-select';
 
 interface DashboardData {
   totalRevenue: number;
@@ -54,20 +55,20 @@ export default function AdminDashboard() {
 
   const [startDateInput, setStartDateInput] = useState(format(startOfMonth(new Date()), 'yyyy-MM-dd'));
   const [endDateInput, setEndDateInput] = useState(format(endOfMonth(new Date()), 'yyyy-MM-dd'));
-  const [selectedShopInput, setSelectedShopInput] = useState('');
-  const [selectedBrandInput, setSelectedBrandInput] = useState('');
-  const [selectedProductInput, setSelectedProductInput] = useState('');
-  const [selectedManagerInput, setSelectedManagerInput] = useState('');
-  const [selectedProgramInput, setSelectedProgramInput] = useState('');
+  const [selectedShopInputs, setSelectedShopInputs] = useState<string[]>([]);
+  const [selectedBrandInputs, setSelectedBrandInputs] = useState<string[]>([]);
+  const [selectedProductInputs, setSelectedProductInputs] = useState<string[]>([]);
+  const [selectedManagerInputs, setSelectedManagerInputs] = useState<string[]>([]);
+  const [selectedProgramInputs, setSelectedProgramInputs] = useState<string[]>([]);
 
   const [appliedFilters, setAppliedFilters] = useState({
     startDate: format(startOfMonth(new Date()), 'yyyy-MM-dd'),
     endDate: format(endOfMonth(new Date()), 'yyyy-MM-dd'),
-    shopId: '',
-    brandId: '',
-    productId: '',
-    managerId: '',
-    programId: ''
+    shopIds: [] as string[],
+    brandIds: [] as string[],
+    productIds: [] as string[],
+    managerIds: [] as string[],
+    programIds: [] as string[]
   });
 
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'achievement', direction: 'desc' });
@@ -141,43 +142,62 @@ export default function AdminDashboard() {
       // end of day in Vietnam timezone
       const endIso = new Date(`${appliedFilters.endDate}T23:59:59+07:00`).toISOString();
 
-      let query = supabase
-        .from('order_details')
-        .select(`
-          *,
-          orders!inner(
-            id, cart_id, created_at, pg_id, program_id, shop_id,
-            customer_name, customer_phone,
-            profiles!inner(full_name, manager_id)
-          )
-        `)
-        .gte('orders.created_at', startIso)
-        .lte('orders.created_at', endIso);
+      let allData: any[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-      if (isSup && user?.id) {
-        const { data: assignedPrograms } = await supabase
-          .from('sup_programs')
-          .select('program_id')
-          .eq('sup_id', user.id);
-        const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
-        
-        if (assignedProgramIds.length > 0) {
-          query = query.in('orders.program_id', assignedProgramIds);
-        } else {
-          return [];
+      while (hasMore) {
+        let query = supabase
+          .from('order_details')
+          .select(`
+            *,
+            orders!inner(
+              id, cart_id, created_at, pg_id, program_id, shop_id,
+              customer_name, customer_phone,
+              profiles!inner(full_name, manager_id)
+            )
+          `)
+          .gte('orders.created_at', startIso)
+          .lte('orders.created_at', endIso)
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (isSup && user?.id) {
+          const { data: assignedPrograms } = await supabase
+            .from('sup_programs')
+            .select('program_id')
+            .eq('sup_id', user.id);
+          const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
+          
+          if (assignedProgramIds.length > 0) {
+            query = query.in('orders.program_id', assignedProgramIds);
+          } else {
+            return [];
+          }
+          
+          query = query.eq('orders.profiles.manager_id', user.id);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          console.error('Lỗi tải dữ liệu đơn hàng:', error);
+          break; // Return what we have so far
         }
         
-        query = query.eq('orders.profiles.manager_id', user.id);
-      }
-
-      const { data, error } = await query;
-      if (error) {
-        console.error('Lỗi tải dữ liệu đơn hàng:', error);
-        return [];
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+          if (data.length < pageSize) {
+            hasMore = false;
+          } else {
+            page++;
+          }
+        } else {
+          hasMore = false;
+        }
       }
       
       // Flatten or map the data for easier use in the dashboard
-      return (data || []).map(item => {
+      return allData.map(item => {
         const orderRel = Array.isArray(item.orders) ? item.orders[0] : item.orders;
         const profileRel = orderRel?.profiles ? (Array.isArray(orderRel.profiles) ? orderRel.profiles[0] : orderRel.profiles) : null;
         const productRel = Array.isArray(item.products) ? item.products[0] : item.products;
@@ -215,11 +235,11 @@ export default function AdminDashboard() {
     setAppliedFilters({
       startDate: startDateInput,
       endDate: endDateInput,
-      shopId: selectedShopInput,
-      brandId: selectedBrandInput,
-      productId: selectedProductInput,
-      managerId: selectedManagerInput,
-      programId: selectedProgramInput
+      shopIds: selectedShopInputs,
+      brandIds: selectedBrandInputs,
+      productIds: selectedProductInputs,
+      managerIds: selectedManagerInputs,
+      programIds: selectedProgramInputs
     });
   };
 
@@ -227,46 +247,44 @@ export default function AdminDashboard() {
     if (!masterData || !ordersData) return null;
 
     let filteredOrders = [...ordersData];
-    const { shopId, brandId, productId, startDate, endDate, programId } = appliedFilters;
+    const { shopIds, brandIds, productIds, startDate, endDate, programIds, managerIds } = appliedFilters;
 
     const start = new Date(startDate);
     start.setHours(0, 0, 0, 0);
     const end = new Date(endDate);
     end.setHours(23, 59, 59, 999);
 
-    if (programId) {
-      filteredOrders = filteredOrders.filter(o => o.program_id === programId);
+    if (programIds && programIds.length > 0) {
+      filteredOrders = filteredOrders.filter(o => programIds.includes(o.program_id));
     }
 
-    if (brandId) {
-      const productIds = masterData.products.filter(p => p.brand_id === brandId).map(p => p.product_id);
+    if (brandIds && brandIds.length > 0) {
+      const pIds = masterData.products.filter(p => brandIds.includes(p.brand_id)).map(p => p.product_id);
+      filteredOrders = filteredOrders.filter(o => pIds.includes(o.product_id));
+    }
+
+    if (productIds && productIds.length > 0) {
       filteredOrders = filteredOrders.filter(o => productIds.includes(o.product_id));
     }
-
-    if (productId) {
-      filteredOrders = filteredOrders.filter(o => o.product_id === productId);
-    }
-    
-    const { managerId, shopId: filterShopId } = appliedFilters;
     
     let activePgIds = masterData.profiles.filter(p => !p.admin_role).map(p => p.id);
     
-    if (managerId) {
+    if (managerIds && managerIds.length > 0) {
       activePgIds = activePgIds.filter(id => {
         const pg = masterData.profiles.find(p => p.id === id);
-        return pg?.manager_id === managerId;
+        return managerIds.includes(pg?.manager_id || '');
       });
-      filteredOrders = filteredOrders.filter(o => o.manager_id === managerId);
+      filteredOrders = filteredOrders.filter(o => o.manager_id && managerIds.includes(o.manager_id));
     }
 
-    if (filterShopId) {
-      const shopPgIds = masterData.schedules.filter(s => s.shop_id === filterShopId).map(s => s.pg_id);
+    if (shopIds && shopIds.length > 0) {
+      const shopPgIds = masterData.schedules.filter(s => shopIds.includes(s.shop_id)).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => shopPgIds.includes(id));
-      filteredOrders = filteredOrders.filter(o => o.shop_id === filterShopId);
+      filteredOrders = filteredOrders.filter(o => shopIds.includes(o.shop_id));
     }
     
-    if (programId) {
-      const programPgIds = masterData.schedules.filter(s => s.program_id === programId).map(s => s.pg_id);
+    if (programIds && programIds.length > 0) {
+      const programPgIds = masterData.schedules.filter(s => programIds.includes(s.program_id)).map(s => s.pg_id);
       activePgIds = activePgIds.filter(id => programPgIds.includes(id));
     }
 
@@ -567,57 +585,100 @@ export default function AdminDashboard() {
         </div>
         <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Chương trình</label>
-          <select value={selectedProgramInput} onChange={e => setSelectedProgramInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả Program --</option>
-            {masterData?.programs.map(p => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
-          </select>
+          <Select
+            isMulti
+            options={(masterData?.programs || [])
+              .filter(p => {
+                const pStart = p.start_date;
+                const pEnd = p.end_date;
+                if (!pStart || !pEnd) return true;
+                return pStart <= endDateInput && pEnd >= startDateInput;
+              })
+              .map(p => ({ value: p.program_id, label: p.program_name }))}
+            value={(masterData?.programs || [])
+              .filter(p => selectedProgramInputs.includes(p.program_id))
+              .map(p => ({ value: p.program_id, label: p.program_name }))}
+            onChange={(selectedOptions) => {
+              setSelectedProgramInputs(selectedOptions ? selectedOptions.map(o => o.value) : []);
+            }}
+            placeholder="Tất cả Program"
+            className="text-sm"
+            classNamePrefix="select"
+          />
         </div>
         <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Cửa hàng</label>
-          <select value={selectedShopInput} onChange={e => setSelectedShopInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả Cửa hàng --</option>
-            {masterData?.shops
-              .filter(s => !selectedProgramInput || masterData.schedules.some(sch => sch.shop_id === s.shop_id && sch.program_id === selectedProgramInput))
-              .map(s => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
-          </select>
-        </div>
-        <div className="w-full">
-          <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Chương trình</label>
-          <select value={selectedProgramInput} onChange={e => setSelectedProgramInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả Chương trình --</option>
-            {masterData?.programs.map(p => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
-          </select>
+          <Select
+            isMulti
+            options={(masterData?.shops || [])
+              .filter(s => selectedProgramInputs.length === 0 || masterData.schedules.some(sch => sch.shop_id === s.shop_id && selectedProgramInputs.includes(sch.program_id)))
+              .map(s => ({ value: s.shop_id, label: s.shop_name }))}
+            value={(masterData?.shops || [])
+              .filter(s => selectedShopInputs.includes(s.shop_id))
+              .map(s => ({ value: s.shop_id, label: s.shop_name }))}
+            onChange={(selectedOptions) => {
+              setSelectedShopInputs(selectedOptions ? selectedOptions.map(o => o.value) : []);
+            }}
+            placeholder="Tất cả Cửa hàng"
+            className="text-sm"
+            classNamePrefix="select"
+          />
         </div>
         <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Nhãn hàng</label>
-          <select value={selectedBrandInput} onChange={e => {
-            setSelectedBrandInput(e.target.value);
-            setSelectedProductInput('');
-          }} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả Nhãn --</option>
-            {masterData?.brands.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
-          </select>
+          <Select
+            isMulti
+            options={(masterData?.brands || []).map(b => ({ value: b.brand_id, label: b.brand_name }))}
+            value={(masterData?.brands || [])
+              .filter(b => selectedBrandInputs.includes(b.brand_id))
+              .map(b => ({ value: b.brand_id, label: b.brand_name }))}
+            onChange={(selectedOptions) => {
+              setSelectedBrandInputs(selectedOptions ? selectedOptions.map(o => o.value) : []);
+              setSelectedProductInputs([]); // Reset products when changing brands
+            }}
+            placeholder="Tất cả Nhãn"
+            className="text-sm"
+            classNamePrefix="select"
+          />
         </div>
         <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Sản phẩm</label>
-          <select value={selectedProductInput} onChange={e => setSelectedProductInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả SP --</option>
-            {masterData?.products
-              .filter(p => !selectedBrandInput || p.brand_id === selectedBrandInput)
-              .map(p => <option key={p.product_id} value={p.product_id}>{p.product_name}</option>)}
-          </select>
+          <Select
+            isMulti
+            options={(masterData?.products || [])
+              .filter(p => selectedBrandInputs.length === 0 || selectedBrandInputs.includes(p.brand_id))
+              .map(p => ({ value: p.product_id, label: p.product_name }))}
+            value={(masterData?.products || [])
+              .filter(p => selectedProductInputs.includes(p.product_id))
+              .map(p => ({ value: p.product_id, label: p.product_name }))}
+            onChange={(selectedOptions) => {
+              setSelectedProductInputs(selectedOptions ? selectedOptions.map(o => o.value) : []);
+            }}
+            placeholder="Tất cả SP"
+            className="text-sm"
+            classNamePrefix="select"
+          />
         </div>
         <div className="w-full">
           <label className="block text-xs font-bold text-gray-700 uppercase mb-1">Quản lý</label>
-          <select value={selectedManagerInput} onChange={e => setSelectedManagerInput(e.target.value)} className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white">
-            <option value="">-- Tất cả Quản lý --</option>
-            {masterData?.profiles
+          <Select
+            isMulti
+            options={(masterData?.profiles || [])
               .filter(p => {
                 const roleName = masterData.roles?.find(r => r.role_id === p.role_id)?.role_name || '';
                 return p.admin_role || roleName.toUpperCase() === 'SUP' || roleName.toUpperCase() === 'ADMIN';
               })
-              .map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-          </select>
+              .map(m => ({ value: m.id, label: m.full_name }))}
+            value={(masterData?.profiles || [])
+              .filter(p => selectedManagerInputs.includes(p.id))
+              .map(m => ({ value: m.id, label: m.full_name }))}
+            onChange={(selectedOptions) => {
+              setSelectedManagerInputs(selectedOptions ? selectedOptions.map(o => o.value) : []);
+            }}
+            placeholder="Tất cả Quản lý"
+            className="text-sm"
+            classNamePrefix="select"
+          />
         </div>
         <div className="w-full">
           <button 
@@ -756,9 +817,9 @@ export default function AdminDashboard() {
                       onClick={(entry) => {
                         const brand = masterData?.brands.find(b => b.brand_name === entry.name);
                         if (brand) {
-                          setSelectedBrandInput(brand.brand_id);
-                          setSelectedProductInput('');
-                          setAppliedFilters(prev => ({ ...prev, brandId: brand.brand_id, productId: '' }));
+                          setSelectedBrandInputs([brand.brand_id]);
+                          setSelectedProductInputs([]);
+                          setAppliedFilters(prev => ({ ...prev, brandIds: [brand.brand_id], productIds: [] }));
                         }
                       }}
                     >
@@ -784,9 +845,9 @@ export default function AdminDashboard() {
                       onClick={(entry) => {
                         const product = masterData?.products.find(p => p.product_name === entry.name);
                         if (product) {
-                          setSelectedProductInput(product.product_id);
-                          setSelectedBrandInput(product.brand_id);
-                          setAppliedFilters(prev => ({ ...prev, productId: product.product_id, brandId: product.brand_id }));
+                          setSelectedProductInputs([product.product_id]);
+                          setSelectedBrandInputs([product.brand_id]);
+                          setAppliedFilters(prev => ({ ...prev, productIds: [product.product_id], brandIds: [product.brand_id] }));
                         }
                       }}
                     >

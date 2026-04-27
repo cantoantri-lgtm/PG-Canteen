@@ -28,60 +28,83 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, appliedF
   const { data: orders, isLoading } = useQuery({
     queryKey: ['smart_report_orders', appliedFilters, userId, isSup],
     queryFn: async () => {
-      let query = supabase
-        .from('order_details')
-        .select(`
-          *,
-          orders!inner(
-            created_at, pg_id, program_id, shop_id,
-            profiles!inner(manager_id)
-          )
-        `)
-        .gte('orders.created_at', prevPeriodStart.toISOString())
-        .lte('orders.created_at', periodEnd.toISOString());
+      let allData: any[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      let hasMore = true;
 
-      if (isSup && userId) {
-        const { data: assignedPrograms } = await supabase
-          .from('sup_programs')
-          .select('program_id')
-          .eq('sup_id', userId);
-        const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
-        
-        if (assignedProgramIds.length > 0) {
-          query = query.in('orders.program_id', assignedProgramIds);
-        } else {
-          return [];
+      while (hasMore) {
+        let query = supabase
+          .from('order_details')
+          .select(`
+            *,
+            orders!inner(
+              created_at, pg_id, program_id, shop_id,
+              profiles!inner(manager_id)
+            )
+          `)
+          .gte('orders.created_at', prevPeriodStart.toISOString())
+          .lte('orders.created_at', periodEnd.toISOString())
+          .range(page * pageSize, (page + 1) * pageSize - 1);
+
+        if (isSup && userId) {
+          const { data: assignedPrograms } = await supabase
+            .from('sup_programs')
+            .select('program_id')
+            .eq('sup_id', userId);
+          const assignedProgramIds = assignedPrograms?.map(ap => ap.program_id) || [];
+          
+          if (assignedProgramIds.length > 0) {
+            query = query.in('orders.program_id', assignedProgramIds);
+          } else {
+            return [];
+          }
+          
+          query = query.eq('orders.profiles.manager_id', userId);
+        }
+
+        // Handle array of program IDs if passed
+        if (appliedFilters?.programIds && appliedFilters.programIds.length > 0) {
+          query = query.in('orders.program_id', appliedFilters.programIds);
+        }
+        if (appliedFilters?.shopIds && appliedFilters.shopIds.length > 0) {
+          query = query.in('orders.shop_id', appliedFilters.shopIds);
+        }
+        if (appliedFilters?.brandIds && appliedFilters.brandIds.length > 0) {
+          const productIds = masterData?.products?.filter((p: any) => appliedFilters.brandIds.includes(p.brand_id)).map((p: any) => p.product_id) || [];
+          if (productIds.length > 0) {
+            query = query.in('product_id', productIds);
+          } else {
+            return [];
+          }
+        }
+        if (appliedFilters?.productIds && appliedFilters.productIds.length > 0) {
+          query = query.in('product_id', appliedFilters.productIds);
+        }
+        if (appliedFilters?.managerIds && appliedFilters.managerIds.length > 0) {
+          query = query.in('orders.profiles.manager_id', appliedFilters.managerIds);
+        }
+
+        const { data, error } = await query;
+        if (error) {
+          console.error('Lỗi fetch smart report', error);
+          break;
         }
         
-        query = query.eq('orders.profiles.manager_id', userId);
-      }
-
-      if (appliedFilters?.programId) {
-        query = query.eq('orders.program_id', appliedFilters.programId);
-      }
-      if (appliedFilters?.shopId) {
-        query = query.eq('orders.shop_id', appliedFilters.shopId);
-      }
-      if (appliedFilters?.brandId) {
-        const productIds = masterData?.products?.filter((p: any) => p.brand_id === appliedFilters.brandId).map((p: any) => p.product_id) || [];
-        if (productIds.length > 0) {
-          query = query.in('product_id', productIds);
+        if (data && data.length > 0) {
+          allData = [...allData, ...data];
+          if (data.length < pageSize) {
+            hasMore = false;
+          } else {
+            page++;
+          }
         } else {
-          return [];
+          hasMore = false;
         }
       }
-      if (appliedFilters?.productId) {
-        query = query.eq('product_id', appliedFilters.productId);
-      }
-      if (appliedFilters?.managerId) {
-        query = query.eq('orders.profiles.manager_id', appliedFilters.managerId);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
       
       // Flatten the data to match the expected structure in the report logic
-      return (data || []).map(item => {
+      return allData.map(item => {
         const product = masterData?.products?.find((p: any) => p.product_id === item.product_id);
         const brand_id = product?.brand_id;
           
