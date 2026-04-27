@@ -74,6 +74,19 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
     }
   };
 
+  const getBase64 = (file: File | Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64Data = result.split(',')[1];
+        resolve(base64Data);
+      };
+      reader.onerror = error => reject(error);
+    });
+  };
+
   const processBillFile = async (file: File) => {
     setIsScanning(true);
     setScanProgress(5);
@@ -175,12 +188,17 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
         const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn';
 
+        const imageBase64 = await getBase64(compressedFile);
+        const mimeType = compressedFile.type || 'image/jpeg';
+
         // GỌI BACKEND TẠI ĐÂY
         const res = await fetch('/api/v1/scan-bill', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             rawText: rawText,
+            imageBase64,
+            mimeType,
             categoryList
           })
         });
