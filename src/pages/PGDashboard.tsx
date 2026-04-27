@@ -825,12 +825,23 @@ export default function PGDashboard() {
       const details = [...sellItems, ...giftItems];
 
       // 6. Gọi RPC thực hiện Transaction
-      const { error: submitError } = await supabase.rpc('create_order_transaction', { 
+      const { data, error: submitError } = await supabase.rpc('create_order_transaction', { 
         p_header: header, 
         p_details: details 
       });
 
-      if (submitError) throw submitError;
+      if (submitError) {
+        console.error("🚀 Tạo đơn hàng thất bại (RPC Error):", submitError);
+        throw new Error(submitError.message || JSON.stringify(submitError));
+      }
+
+      // Check if data returned itself contains error message (often happens when RPC catches and returns custom JSON)
+      if (data && typeof data === 'object' && (data as any).error) {
+        console.error("🚀 Tạo đơn hàng thất bại (Data Error):", (data as any).error);
+        throw new Error((data as any).error);
+      }
+
+      console.log("🚀 Tạo đơn hàng thành công:", data);
     },
     onSuccess: () => {
       toast.success('🎉 Đã lưu đơn hàng và tải ảnh thành công!');
