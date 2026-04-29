@@ -20,6 +20,7 @@ interface Order {
   created_at: string;
   pg_id: string;
   program_id: string;
+  shop_id?: string;
   product_id: string;
   qty: number;
   net_value: number;
@@ -30,6 +31,7 @@ interface Order {
   distance_from_shop?: number | null;
   profiles?: { full_name: string };
   products?: { product_name: string; brand_id: string };
+  shops?: { shop_name: string; account_name?: string; channel_name?: string };
   is_gift?: boolean;
 }
 
@@ -54,6 +56,7 @@ export default function Orders() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPgFilter, setSelectedPgFilter] = useState('');
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
+  const [selectedShopFilter, setSelectedShopFilter] = useState('');
   const [selectedProgramFilter, setSelectedProgramFilter] = useState('');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
@@ -95,8 +98,15 @@ export default function Orders() {
         .select(`
           id, order_id, product_id, qty, net_value, switched_from_brand, is_gift,
           orders!inner(
-            cart_id, created_at, pg_id, program_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
-            profiles!inner(full_name, manager_id)
+            cart_id, created_at, pg_id, program_id, shop_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
+            profiles!inner(full_name, manager_id),
+            shops(
+              shop_name,
+              accounts(
+                account_name,
+                channels(channel_name)
+              )
+            )
           ),
           products(
             product_name,
@@ -129,7 +139,10 @@ export default function Orders() {
         const order = Array.isArray(item.orders) ? item.orders[0] : item.orders;
         const product = Array.isArray(item.products) ? item.products[0] : item.products;
         const productGroup = Array.isArray(product?.product_group) ? product.product_group[0] : product?.product_group;
-        
+        const shop = Array.isArray(order?.shops) ? order?.shops[0] : order?.shops;
+        const account = Array.isArray(shop?.accounts) ? shop?.accounts[0] : shop?.accounts;
+        const channel = Array.isArray(account?.channels) ? account?.channels[0] : account?.channels;
+
         return {
           id: item.id,
           order_id: item.order_id,
@@ -142,11 +155,17 @@ export default function Orders() {
           created_at: order?.created_at,
           pg_id: order?.pg_id,
           program_id: order?.program_id,
+          shop_id: order?.shop_id,
           customer_name: order?.customer_name,
           customer_phone: order?.customer_phone,
           bill_image_url: order?.bill_image_url,
           distance_from_shop: order?.distance_from_shop,
           profiles: order?.profiles,
+          shops: {
+            shop_name: shop?.shop_name || '',
+            account_name: account?.account_name || '',
+            channel_name: channel?.channel_name || '',
+          },
           products: {
             product_name: product?.product_name,
             brand_id: productGroup?.brand_id
@@ -178,6 +197,15 @@ export default function Orders() {
       const { data, error } = await supabase.from('brands').select('*').order('brand_name');
       if (error) throw error;
       return data as Brand[];
+    }
+  });
+
+  const { data: shops = [] } = useQuery({
+    queryKey: ['shops_list'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('shops').select('shop_id, shop_name').order('shop_name');
+      if (error) throw error;
+      return data as { shop_id: string, shop_name: string }[];
     }
   });
 
@@ -238,14 +266,15 @@ export default function Orders() {
       const matchesPg = selectedPgFilter === '' || o.pg_id === selectedPgFilter;
       const matchesBrand = selectedBrandFilter === '' || o.products?.brand_id === selectedBrandFilter;
       const matchesProgram = selectedProgramFilter === '' || o.program_id === selectedProgramFilter;
+      const matchesShop = selectedShopFilter === '' || o.shop_id === selectedShopFilter;
       
       const orderDateStr = o.created_at ? o.created_at.substring(0, 10) : '';
       const matchesStartDate = startDateFilter === '' || orderDateStr >= startDateFilter;
       const matchesEndDate = endDateFilter === '' || orderDateStr <= endDateFilter;
       
-      return matchesSearch && matchesPg && matchesBrand && matchesProgram && matchesStartDate && matchesEndDate;
+      return matchesSearch && matchesPg && matchesBrand && matchesProgram && matchesShop && matchesStartDate && matchesEndDate;
     });
-  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter, startDateFilter, endDateFilter]);
+  }, [orders, searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter, selectedShopFilter, startDateFilter, endDateFilter]);
 
   interface CartGroup {
     cart_id: string;
@@ -298,7 +327,7 @@ export default function Orders() {
   useEffect(() => {
     setCurrentPage(1);
     setExpandedCartId(null);
-  }, [searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter, startDateFilter, endDateFilter]);
+  }, [searchQuery, selectedPgFilter, selectedBrandFilter, selectedProgramFilter, selectedShopFilter, startDateFilter, endDateFilter]);
 
   // --- 3. MUTATIONS (THÊM / SỬA / XÓA) ---
   const saveMutation = useMutation({
@@ -549,6 +578,9 @@ export default function Orders() {
     const rows = filteredOrders.map(order => ({
       'Mã Giỏ Hàng': order.cart_id,
       'Ngày tạo': new Date(order.created_at).toLocaleString('vi-VN'),
+      'Kênh': order.shops?.channel_name || 'N/A',
+      'Account': order.shops?.account_name || 'N/A',
+      'Cửa hàng': order.shops?.shop_name || 'N/A',
       'Nhân viên PG': order.profiles?.full_name || 'N/A',
       'Sản phẩm': order.products?.product_name || 'N/A',
       'Số lượng': order.qty,
@@ -687,6 +719,17 @@ export default function Orders() {
           </select>
         </div>
         <div className="w-full sm:w-48">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Cửa hàng</label>
+          <select
+            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+            value={selectedShopFilter}
+            onChange={(e) => setSelectedShopFilter(e.target.value)}
+          >
+            <option value="">Tất cả Cửa hàng</option>
+            {shops.map((s: any) => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
+          </select>
+        </div>
+        <div className="w-full sm:w-48">
           <label className="block text-sm font-medium text-gray-700 mb-1">Lọc theo PG</label>
           <select
             className="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
@@ -733,6 +776,7 @@ export default function Orders() {
               setSelectedPgFilter('');
               setSelectedBrandFilter('');
               setSelectedProgramFilter('');
+              setSelectedShopFilter('');
               setStartDateFilter('');
               setEndDateFilter('');
             }}
