@@ -48,7 +48,7 @@ export default function KPIs() {
     queryFn: async () => {
       let query = supabase
         .from('kpis')
-        .select('*, profiles!inner(full_name, manager_id)')
+        .select('*, profiles(full_name, manager_id)')
         .order('start_date', { ascending: false });
       
       if (isSup && user?.id) {

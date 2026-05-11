@@ -172,6 +172,19 @@ export default function Profiles() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
+      // 1. Cập nhật các đơn hàng (nếu có) thành PG vãng lai (pg_id = null)
+      const { error: updateOrderError } = await supabase.from('orders').update({ pg_id: null }).eq('pg_id', id);
+      if (updateOrderError) throw updateOrderError;
+
+      // Xóa lịch làm việc và KPI để tránh lỗi Foreign Key
+      await supabase.from('schedules').delete().eq('pg_id', id);
+      await supabase.from('kpis').delete().eq('pg_id', id);
+
+      // Xóa assignments nếu là SUP
+      await supabase.from('sup_programs').delete().eq('sup_id', id);
+      await supabase.from('inventories').delete().eq('sup_id', id);
+
+      // 2. Xóa người dùng bằng RPC
       const { error } = await supabase.rpc('delete_user_by_admin', { p_user_id: id });
       if (error) throw error;
       return id;

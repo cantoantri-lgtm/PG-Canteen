@@ -41,38 +41,87 @@ interface ScanbillProps {
   disabled?: boolean;
 }
 
+// 1. TỐI ƯU LOCAL OCR: Singleton Worker Logic
+let currentProgressCallback: ((p: number) => void) | null = null;
+let tesseractWorkerPromise: Promise<Tesseract.Worker> | null = null;
+
+const getTesseractWorker = () => {
+  if (!tesseractWorkerPromise) {
+    tesseractWorkerPromise = Tesseract.createWorker('vie', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text' && currentProgressCallback) {
+          currentProgressCallback(Math.floor(m.progress * 30));
+        }
+      }
+    });
+  }
+  return tesseractWorkerPromise;
+};
+
+// Hàm tiền xử lý hình ảnh (Grayscale + Tăng độ tương phản)
+const preprocessImage = async (file: File): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(file);
+      
+      ctx.drawImage(img, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        // Luminance (Grayscale)
+        let luminance = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+        // Increase contrast
+        luminance = (luminance - 128) * 1.5 + 128; 
+        luminance = Math.max(0, Math.min(255, luminance));
+        data[i] = data[i+1] = data[i+2] = luminance;
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      canvas.toBlob(blob => {
+        if (blob) {
+          resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+        } else {
+          resolve(file);
+        }
+      }, 'image/jpeg', 0.9);
+    };
+    img.onerror = () => resolve(file);
+    img.src = URL.createObjectURL(file);
+  });
+};
+
+// 2. BỘ LỌC CHẶN CLOUD (Gatekeeper Logic)
+const shouldUseCloudAI = (tesseractResult: any, matchedItems: any[]): boolean => {
+  const confidence = tesseractResult?.data?.confidence || 0;
+  const rawText = tesseractResult?.data?.text || '';
+  
+  if (confidence < 60) {
+    console.log(`[Gatekeeper] Độ tin cậy OCR quá thấp: ${confidence}%`);
+    return true;
+  }
+  if (rawText.length < 30) {
+    console.log(`[Gatekeeper] Lượng chữ đọc được quá ngắn: ${rawText.length} ký tự`);
+    return true;
+  }
+  if (matchedItems.length === 0) {
+    console.log('[Gatekeeper] Local không nhận diện được SKU mục tiêu nào');
+    return true;
+  }
+  return false;
+};
+
 export default function Scanbill({ products, productAliases, ocrErrors = [], onScanComplete, disabled }: ScanbillProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanStatus, setScanStatus] = useState('');
-
-  // 1. LOCAL OCR FUNCTION
-  const localExtractText = async (imageFile: File): Promise<string> => {
-    try {
-      setScanStatus('Khởi tạo AI Local (Tesseract)...');
-      
-      const result = await Tesseract.recognize(
-        imageFile,
-        'vie',
-        {
-          logger: m => {
-            if (m.status === 'recognizing text') {
-              // Tesseract progress goes from 0 to 1
-              setScanProgress(Math.floor(m.progress * 30));
-            }
-          }
-        }
-      );
-      
-      return result.data.text;
-    } catch (err) {
-      console.error('Local OCR Error:', err);
-      // Trả về chuỗi rỗng để hệ thống kích hoạt Fallback Cloud AI thay vì sập
-      return ''; 
-    }
-  };
 
   const getBase64 = (file: File | Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -90,15 +139,15 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
   const processBillFile = async (file: File) => {
     setIsScanning(true);
     setScanProgress(5);
-    setScanStatus('Đang nén ảnh...');
+    setScanStatus('Đang nén và tiền xử lý ảnh...');
     
     let progressInterval: NodeJS.Timeout | null = null;
 
     try {
-      // Nén ảnh ở máy khách
+      // 3. TỐI ƯU CLOUD FALLBACK: Đảm bảo ảnh nén max 1MB
       const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1200, // Reduced for faster local OCR
+        maxSizeMB: 1, 
+        maxWidthOrHeight: 1200,
         useWebWorker: true
       };
       let compressedFile: File;
@@ -108,18 +157,21 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         compressedFile = file;
       }
 
-      setScanProgress(10);
+      // Tiền xử lý ảnh (chuyển Grayscale) giúp Tesseract đọc tốt hơn
+      const preppedFile = await preprocessImage(compressedFile);
+
+      setScanProgress(15);
       setScanStatus('Đang quét nhanh tại Local...');
 
-      // BƯỚC 1: Gọi Local OCR để trích xuất text
-      const rawText = await localExtractText(compressedFile);
-      const lines = rawText.split('\\n').map(l => l.trim()).filter(Boolean);
+      // Gọi Singleton Worker Local OCR
+      currentProgressCallback = setScanProgress;
+      const worker = await getTesseractWorker();
+      const ocrResult = await worker.recognize(preppedFile);
+      const rawText = ocrResult.data.text;
+      
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
 
-      // BƯỚC 2: Matching cơ bản tại Local
       let localMatchedItems: any[] = [];
-      let maxConfidence = 0;
-
-      // Logic quét đơn giản (Ví dụ minh họa, duyệt qua từng dòng)
       const keywordToProductMatch = (line: string) => {
         let bestMatch: Product | null = null;
         let score = 0;
@@ -127,7 +179,6 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         products.forEach(p => {
           const pNameLower = p.product_name.toLowerCase();
           const lineLower = line.toLowerCase();
-          // Nếu dòng chứa tên sản phẩm
           if (lineLower.includes(pNameLower)) {
             let currentScore = pNameLower.length; 
             if (currentScore > score) {
@@ -144,15 +195,12 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         const line = lines[i];
         const match = keywordToProductMatch(line);
         if (match) {
-          if (match.score > maxConfidence) maxConfidence = match.score;
-          // Cố gắng tìm giá ở dòng tiếp theo bằng regex
-          let price = match.product.value; // Mac dinh la gia goc
+          let price = match.product.value; 
           if (i + 1 < lines.length) {
             const nextLine = lines[i+1];
-            // Tim cac chu so ex: "1 25.000 25.000"
-            const numMatches = nextLine.match(/\\d+[.,\\s]*\\d*/g);
+            const numMatches = nextLine.match(/\d+[.,\s]*\d*/g);
             if (numMatches && numMatches.length >= 2) {
-              const possiblePrice = parseInt(numMatches[1].replace(/\\D/g, ''));
+              const possiblePrice = parseInt(numMatches[1].replace(/\D/g, ''));
               if (possiblePrice > 1000) price = possiblePrice;
             }
           }
@@ -167,15 +215,14 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
 
       let items = [];
 
-      // BƯỚC 3: Logic Fallback (Nếu Local không tìm thấy hoặc ko đủ tự tin)
-      if (localMatchedItems.length > 0 && maxConfidence > 5) {
-        setScanStatus('Đã tìm thấy bằng Local AI!');
+      // Áp dụng Gatekeeper Logic
+      if (!shouldUseCloudAI(ocrResult, localMatchedItems)) {
+        setScanStatus('Đã tìm ra và xử lý xong bằng Local AI!');
         setScanProgress(100);
         items = localMatchedItems;
-        console.log("Local Matching Success:", items);
+        console.log("Local OCR hoàn tất thành công:", items);
       } else {
-        // BƯỚC 4: Fallback Cloud AI (Gửi Request lên Backend)
-        setScanStatus('Local AI không đủ dữ liệu. Gửi lên Cloud AI...');
+        setScanStatus('Local AI không đủ tinh cậy. Fallback sang Cloud AI...');
         setScanProgress(40);
         
         progressInterval = setInterval(() => {
@@ -186,16 +233,17 @@ export default function Scanbill({ products, productAliases, ocrErrors = [], onS
         }, 300);
 
         const uniqueCategories = Array.from(new Set(products.map(p => p.category_name).filter(Boolean)));
-        const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Băng vệ sinh, Tã bỉm trẻ em, Tã người lớn';
+        const categoryList = uniqueCategories.length > 0 ? uniqueCategories.join(', ') : 'Khác';
 
-        const imageBase64 = await getBase64(compressedFile);
+        const imageBase64 = await getBase64(compressedFile); // Dùng file nén < 1MB
         const mimeType = compressedFile.type || 'image/jpeg';
 
-        // GỌI BACKEND TẠI ĐÂY
+        // Gọi Cloud Fallback - Truyền model alias nhanh & rẻ (gemini-1.5-flash-8b)
         const res = await fetch('/api/v1/scan-bill', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            modelName: 'gemini-1.5-flash-8b', 
             rawText: rawText,
             imageBase64,
             mimeType,

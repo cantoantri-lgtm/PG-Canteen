@@ -112,7 +112,7 @@ export default function SupReport() {
         query = query.eq('orders.program_id', selectedProgramId);
       }
         
-      const { data, error } = await query;
+      const { data, error } = await query.limit(10000);
         
       if (error) throw error;
       

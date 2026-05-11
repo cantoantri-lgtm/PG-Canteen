@@ -30,7 +30,8 @@ export function useRealtimeSync({ table, queryKey, idColumn, selectQuery = '*' }
               .single();
 
             if (!error && data) {
-              queryClient.setQueryData(queryKey, (old: any[] = []) => {
+              queryClient.setQueriesData({ queryKey }, (old: any) => {
+                if (!Array.isArray(old)) return old;
                 const exists = old.some(item => item[idColumn] === data[idColumn]);
                 if (payload.eventType === 'INSERT' && !exists) {
                   return [...old, data];
@@ -41,7 +42,8 @@ export function useRealtimeSync({ table, queryKey, idColumn, selectQuery = '*' }
               });
             }
           } else if (payload.eventType === 'DELETE') {
-            queryClient.setQueryData(queryKey, (old: any[] = []) => {
+            queryClient.setQueriesData({ queryKey }, (old: any) => {
+              if (!Array.isArray(old)) return old;
               return old.filter(item => item[idColumn] !== payload.old[idColumn]);
             });
           }

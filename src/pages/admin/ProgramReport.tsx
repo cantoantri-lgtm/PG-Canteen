@@ -60,7 +60,7 @@ export default function ProgramReport() {
           id, order_id, product_id, qty, net_value, switched_from_brand,
           orders!inner(
             cart_id, created_at, pg_id, program_id,
-            profiles!inner(manager_id)
+            profiles(manager_id)
           ),
           products (
             product_name,
@@ -71,7 +71,8 @@ export default function ProgramReport() {
         `)
         .eq('orders.program_id', selectedProgramId)
         .gte('orders.created_at', new Date(startStr).toISOString())
-        .lte('orders.created_at', new Date(endStr).toISOString());
+        .lte('orders.created_at', new Date(endStr).toISOString())
+        .limit(10000);
         
       if (error) throw error;
       

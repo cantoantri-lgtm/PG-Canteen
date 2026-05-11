@@ -40,7 +40,7 @@ export function useSmartReport(masterData: any, isOpen: boolean = true, appliedF
             *,
             orders!inner(
               created_at, pg_id, program_id, shop_id,
-              profiles!inner(manager_id)
+              profiles(manager_id)
             )
           `)
           .gte('orders.created_at', prevPeriodStart.toISOString())

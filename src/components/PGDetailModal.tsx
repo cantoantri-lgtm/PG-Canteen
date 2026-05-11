@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { X, Eye } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
@@ -79,22 +79,30 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
     const conversionRate = totalQty > 0 ? (convertedQty / totalQty) * 100 : 0;
 
     const brandMap: Record<string, number> = {};
-    const productMap: Record<string, number> = {};
+    const dailyMap: Record<string, number> = {};
 
     pgOrders.forEach(order => {
       const val = Number(order.net_value || 0);
       const product = masterData.products.find((p: any) => p.product_id === order.product_id);
       const brand = masterData.brands.find((b: any) => b.brand_id === product?.brand_id);
 
-      const productName = product?.product_name || 'Không xác định';
       const brandName = brand?.brand_name || 'Khác';
+      const dateKey = order.created_at ? format(new Date(order.created_at), 'yyyy-MM-dd') : 'N/A';
 
-      productMap[productName] = (productMap[productName] || 0) + val;
       brandMap[brandName] = (brandMap[brandName] || 0) + val;
+      if (dateKey !== 'N/A') {
+        dailyMap[dateKey] = (dailyMap[dateKey] || 0) + val;
+      }
     });
 
     const brandData = Object.entries(brandMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value);
-    const productData = Object.entries(productMap).map(([name, value]) => ({ name, value })).sort((a,b) => b.value - a.value).slice(0, 5);
+    
+    const dailySalesData = Object.entries(dailyMap)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, value]) => ({
+        date: format(new Date(date), 'dd/MM'),
+        value
+      }));
 
     const orderTableData = pgOrders.map(o => {
       const product = masterData.products.find((p: any) => p.product_id === o.product_id);
@@ -117,7 +125,7 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
       kpiAchievement,
       conversionRate,
       brandData,
-      productData,
+      dailySalesData,
       orderTableData
     };
   }, [pgId, orders, masterData, kpi]);
@@ -173,16 +181,25 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
             </div>
 
             <div className="bg-white shadow-sm rounded-lg p-5 border border-gray-100">
-              <h3 className="text-md font-bold text-gray-800 mb-4">Tỉ trọng Sản phẩm (Top 5)</h3>
+              <h3 className="text-md font-bold text-gray-800 mb-4">Doanh số theo ngày</h3>
               <div className="h-64 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={data.productData} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={({name, percent}) => `${(percent * 100).toFixed(0)}%`}>
-                      {data.productData.map((_, index) => <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                    <Legend layout="horizontal" verticalAlign="bottom" />
-                  </PieChart>
+                  <BarChart data={data.dailySalesData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#6b7280' }} axisLine={false} tickLine={false} />
+                    <YAxis 
+                      tickFormatter={(value) => value >= 1000000 ? `${(value / 1000000).toFixed(0)}M` : `${value / 1000}k`}
+                      tick={{ fontSize: 12, fill: '#6b7280' }} 
+                      axisLine={false} 
+                      tickLine={false} 
+                    />
+                    <Tooltip 
+                      formatter={(value: number) => formatCurrency(value)}
+                      labelStyle={{ color: '#374151', fontWeight: 600 }}
+                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}
+                    />
+                    <Bar dataKey="value" fill="#4f46e5" radius={[4, 4, 0, 0]} maxBarSize={40} />
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
             </div>

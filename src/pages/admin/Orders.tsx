@@ -4,7 +4,7 @@ import { Plus, Edit2, Trash2, Download, Eye } from 'lucide-react';
 import Modal from '../../components/Modal';
 import ConfirmModal from '../../components/ConfirmModal';
 import Pagination from '../../components/Pagination';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useRealtimeSync } from '../../hooks/useRealtimeSync';
 import { useAuth } from '../../lib/AuthContext';
@@ -46,6 +46,7 @@ export default function Orders() {
                   user?.role_name?.toUpperCase() === 'ADMIN' || 
                   user?.email?.toLowerCase() === 'can.toantri@gmail.com';
   const isSup = user?.role_name?.toUpperCase() === 'SUP' || user?.role_id === 'SUP';
+  const queryClient = useQueryClient();
 
   // --- STATES ---
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -58,8 +59,14 @@ export default function Orders() {
   const [selectedBrandFilter, setSelectedBrandFilter] = useState('');
   const [selectedShopFilter, setSelectedShopFilter] = useState('');
   const [selectedProgramFilter, setSelectedProgramFilter] = useState('');
-  const [startDateFilter, setStartDateFilter] = useState('');
-  const [endDateFilter, setEndDateFilter] = useState('');
+  
+  const today = new Date();
+  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const formatDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+  const [startDateFilter, setStartDateFilter] = useState(formatDate(firstDay));
+  const [endDateFilter, setEndDateFilter] = useState(formatDate(lastDay));
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 30;
   
@@ -89,8 +96,8 @@ export default function Orders() {
   };
 
   // --- 1. LẤY DỮ LIỆU TỪ SUPABASE ---
-  const { data: orders = [], isLoading: loadingOrders, error: ordersError } = useQuery({
-    queryKey: ['admin_orders_list', user?.id, isSup, authLoading],
+  const { data: orders = [], isLoading: loadingOrders, error: ordersError, refetch: refetchOrders } = useQuery({
+    queryKey: ['admin_orders_list', user?.id, isSup, authLoading, startDateFilter, endDateFilter, selectedShopFilter, selectedProgramFilter, selectedPgFilter, selectedBrandFilter],
     queryFn: async () => {
       if (authLoading) return [];
       let query = supabase
@@ -99,7 +106,7 @@ export default function Orders() {
           id, order_id, product_id, qty, net_value, switched_from_brand, is_gift,
           orders!inner(
             cart_id, created_at, pg_id, program_id, shop_id, customer_name, customer_phone, bill_image_url, distance_from_shop,
-            profiles!inner(full_name, manager_id),
+            profiles(full_name, manager_id),
             shops(
               shop_name,
               accounts(
@@ -108,11 +115,31 @@ export default function Orders() {
               )
             )
           ),
-          products(
+          products!inner(
             product_name,
             product_group!inner(brand_id)
           )
         `);
+
+      if (selectedShopFilter) {
+        query = query.eq('orders.shop_id', selectedShopFilter);
+      }
+      if (selectedProgramFilter) {
+        query = query.eq('orders.program_id', selectedProgramFilter);
+      }
+      if (selectedPgFilter) {
+        query = query.eq('orders.pg_id', selectedPgFilter);
+      }
+      if (selectedBrandFilter) {
+        query = query.eq('products.product_group.brand_id', selectedBrandFilter);
+      }
+
+      if (startDateFilter) {
+        query = query.gte('orders.created_at', new Date(`${startDateFilter}T00:00:00+07:00`).toISOString());
+      }
+      if (endDateFilter) {
+        query = query.lte('orders.created_at', new Date(`${endDateFilter}T23:59:59+07:00`).toISOString());
+      }
 
       if (isSup && user?.id) {
         // Get assigned program IDs first
@@ -127,7 +154,9 @@ export default function Orders() {
         query = query.in('orders.program_id', assignedIds);
       }
 
-      const { data, error } = await query.order('id', { ascending: false });
+      const { data, error } = await query
+        .order('id', { ascending: false })
+        .limit(10000);
       
       if (error) {
         console.error('Lỗi tải đơn hàng:', error);
@@ -254,7 +283,7 @@ export default function Orders() {
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
       const cartId = o.cart_id || '';
-      const pgName = o.profiles?.full_name || '';
+      const pgName = o.profiles?.full_name || 'PG vãng lai';
       const custName = o.customer_name || '';
       const custPhone = o.customer_phone || '';
       
@@ -268,7 +297,7 @@ export default function Orders() {
       const matchesProgram = selectedProgramFilter === '' || o.program_id === selectedProgramFilter;
       const matchesShop = selectedShopFilter === '' || o.shop_id === selectedShopFilter;
       
-      const orderDateStr = o.created_at ? o.created_at.substring(0, 10) : '';
+      const orderDateStr = o.created_at ? new Date(o.created_at).toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }) : '';
       const matchesStartDate = startDateFilter === '' || orderDateStr >= startDateFilter;
       const matchesEndDate = endDateFilter === '' || orderDateStr <= endDateFilter;
       
@@ -282,11 +311,13 @@ export default function Orders() {
     created_at: string;
     pg_id: string;
     program_id: string;
+    shop_id?: string;
     customer_name: string | null;
     customer_phone: string | null;
     bill_image_url: string | null;
     distance_from_shop: number | null;
     profiles: { full_name: string } | undefined;
+    shops?: { shop_name: string; account_name?: string; channel_name?: string };
     total_amount: number;
     items: Order[];
   }
@@ -303,11 +334,13 @@ export default function Orders() {
           created_at: o.created_at,
           pg_id: o.pg_id,
           program_id: o.program_id,
+          shop_id: o.shop_id,
           customer_name: o.customer_name,
           customer_phone: o.customer_phone,
           bill_image_url: o.bill_image_url,
           distance_from_shop: o.distance_from_shop,
           profiles: o.profiles,
+          shops: o.shops,
           total_amount: 0,
           items: []
         });
@@ -345,6 +378,7 @@ export default function Orders() {
             cart_id: activeCartId,
             pg_id: payload.pg_id,
             program_id: payload.program_id,
+            shop_id: payload.shop_id,
             customer_name: payload.customer_name,
             customer_phone: payload.customer_phone,
             bill_image_url: payload.bill_image_url,
@@ -418,6 +452,7 @@ export default function Orders() {
           .update({
             pg_id: payload.pg_id,
             program_id: payload.program_id,
+            shop_id: payload.shop_id,
             customer_name: payload.customer_name,
             customer_phone: payload.customer_phone,
             bill_image_url: payload.bill_image_url
@@ -430,6 +465,9 @@ export default function Orders() {
       }
     },
     onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['admin_orders_list'] });
+      queryClient.invalidateQueries({ queryKey: ['sup_report_orders'] });
+      queryClient.invalidateQueries({ queryKey: ['smart_report_orders'] });
       toast.success(isAdding ? 'Thêm sản phẩm thành công!' : 'Cập nhật thành công!');
       if (result.isKeepOpen && isAdding) {
         // Lưu lại mã giỏ hàng để gom chung các món tiếp theo
@@ -454,7 +492,12 @@ export default function Orders() {
       if (error) throw error;
       return id;
     },
-    onSuccess: () => toast.success('Đã xóa sản phẩm khỏi hệ thống!')
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin_orders_list'] });
+      queryClient.invalidateQueries({ queryKey: ['sup_report_orders'] });
+      queryClient.invalidateQueries({ queryKey: ['smart_report_orders'] });
+      toast.success('Đã xóa sản phẩm khỏi hệ thống!');
+    }
   });
 
   // --- 4. CÁC HÀM XỬ LÝ GIAO DIỆN ---
@@ -487,7 +530,7 @@ export default function Orders() {
   };
 
   const handleSave = (isKeepOpen = false) => {
-    if (!editForm.pg_id || !editForm.program_id || !editForm.product_id || !editForm.qty || editForm.net_value === undefined) {
+    if (!editForm.pg_id || !editForm.program_id || !editForm.shop_id || !editForm.product_id || !editForm.qty || editForm.net_value === undefined) {
       toast.error("Vui lòng điền đầy đủ các trường bắt buộc (*)");
       return;
     }
@@ -499,6 +542,7 @@ export default function Orders() {
     const payload = {
       pg_id: editForm.pg_id,
       program_id: editForm.program_id,
+      shop_id: editForm.shop_id,
       product_id: editForm.product_id,
       qty: editForm.qty,
       net_value: editForm.net_value,
@@ -581,7 +625,7 @@ export default function Orders() {
       'Kênh': order.shops?.channel_name || 'N/A',
       'Account': order.shops?.account_name || 'N/A',
       'Cửa hàng': order.shops?.shop_name || 'N/A',
-      'Nhân viên PG': order.profiles?.full_name || 'N/A',
+      'Nhân viên PG': order.profiles?.full_name || 'PG vãng lai',
       'Sản phẩm': order.products?.product_name || 'N/A',
       'Số lượng': order.qty,
       'Thành tiền': order.net_value,
@@ -804,6 +848,7 @@ export default function Orders() {
                   <tr>
                     <th className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900">Mã GH / Ngày tạo</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Nhân viên PG</th>
+                    <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Cửa hàng</th>
                     <th className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">Khách hàng</th>
                     <th className="px-3 py-3.5 text-right text-sm font-semibold text-gray-900">Tổng tiền</th>
                     <th className="px-3 py-3.5 text-center text-sm font-semibold text-gray-900">Hóa đơn</th>
@@ -818,7 +863,8 @@ export default function Orders() {
                           <div className="font-mono text-[10px] text-gray-400 uppercase">{group.cart_id}</div>
                           <div className="text-gray-900">{new Date(group.created_at).toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'})}</div>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-indigo-600">{group.profiles?.full_name || 'N/A'}</td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-indigo-600">{group.profiles?.full_name || 'PG vãng lai'}</td>
+                        <td className="whitespace-nowrap px-3 py-4 text-sm font-medium text-gray-900">{group.shops?.shop_name || 'N/A'}</td>
                         <td className="whitespace-nowrap px-3 py-4 text-sm">
                           <div className="text-gray-900 font-medium">{group.customer_name || '-'}</div>
                           <div className="text-gray-500 text-xs">{group.customer_phone || ''}</div>
@@ -855,7 +901,7 @@ export default function Orders() {
                       </tr>
                       {expandedCartId === group.cart_id && (
                         <tr>
-                          <td colSpan={6} className="px-4 py-4 bg-gray-50">
+                          <td colSpan={7} className="px-4 py-4 bg-gray-50">
                             <div className="rounded-lg border border-gray-200 bg-white overflow-hidden shadow-inner">
                               <table className="min-w-full divide-y divide-gray-200">
                                 <thead className="bg-gray-100">
@@ -965,6 +1011,19 @@ export default function Orders() {
             >
               <option value="">-- Chọn chương trình --</option>
               {programs.map((p: any) => <option key={p.program_id} value={p.program_id}>{p.program_name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Cửa hàng *</label>
+            <select
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm border p-2 bg-white"
+              value={editForm.shop_id || ''}
+              onChange={e => setEditForm({...editForm, shop_id: e.target.value})}
+              disabled={!!currentCartId}
+            >
+              <option value="">-- Chọn cửa hàng --</option>
+              {shops.map((s: any) => <option key={s.shop_id} value={s.shop_id}>{s.shop_name}</option>)}
             </select>
           </div>
 

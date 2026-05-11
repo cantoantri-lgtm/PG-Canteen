@@ -16,7 +16,7 @@ async function startServer() {
   // API Route for Scanbill
   app.post('/api/v1/scan-bill', async (req, res) => {
     try {
-      const { rawText, imageBase64, mimeType, categoryList } = req.body;
+      const { rawText, imageBase64, mimeType, categoryList, modelName } = req.body;
 
       if (!rawText && !imageBase64) {
         return res.status(400).json({ error: 'Thiếu dữ liệu (văn bản hoặc hình ảnh)' });
@@ -28,6 +28,8 @@ async function startServer() {
       }
 
       const ai = new GoogleGenAI({ apiKey });
+      const activeModel = modelName || 'gemini-1.5-flash-8b';
+
       let promptText = `Bạn là hệ thống AI chuyên trích xuất dữ liệu hóa đơn siêu thị.
 
 NHIỆM VỤ: 
@@ -62,7 +64,7 @@ Trả về JSON với 'raw_name' (giữ nguyên từng chữ cái trên bill), '
       }
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: activeModel,
         contents: {
           parts: parts
         },

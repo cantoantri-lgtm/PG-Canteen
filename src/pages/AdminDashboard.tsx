@@ -155,7 +155,7 @@ export default function AdminDashboard() {
             orders!inner(
               id, cart_id, created_at, pg_id, program_id, shop_id,
               customer_name, customer_phone,
-              profiles!inner(full_name, manager_id)
+              profiles(full_name, manager_id)
             )
           `)
           .gte('orders.created_at', startIso)
