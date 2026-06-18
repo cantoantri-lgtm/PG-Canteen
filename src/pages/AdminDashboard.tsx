@@ -925,7 +925,7 @@ export default function AdminDashboard() {
                       >
                         {pg.name}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{pg.shopName}</td>
+                      <td className="px-6 py-4 text-sm text-gray-500 whitespace-normal min-w-[150px] max-w-[200px] leading-snug">{pg.shopName}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-indigo-600">{formatCurrency(pg.dailySales)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.dailyKpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
