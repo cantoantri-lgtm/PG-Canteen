@@ -25,6 +25,7 @@ interface DashboardData {
   brandData: any[];
   productData: any[];
   pgRankings: any[];
+  standardProgressPercent: number;
 }
 
 interface MasterData {
@@ -432,23 +433,31 @@ export default function AdminDashboard() {
       }
     });
 
-    const pgRankings = Object.values(pgMap)
-      .map(pg => ({ 
-        ...pg, 
-        achievement: (pg.sales / pg.kpi) * 100,
-        dailyAchievement: pg.dailyKpi > 0 ? (pg.dailySales / pg.dailyKpi) * 100 : 0
-      }))
-      .filter(pg => pg.sales > 0 || pg.kpi > 1);
-
     const monthStart = startOfMonth(end);
     let workingDaysPassed = 0;
     try {
-      const daysUpToEnd = eachDayOfInterval({ start: monthStart, end: end });
+      const todayDate = new Date();
+      let effectiveEnd = end > todayDate ? todayDate : end;
+      if (effectiveEnd < monthStart) effectiveEnd = monthStart;
+      
+      const daysUpToEnd = eachDayOfInterval({ start: monthStart, end: effectiveEnd });
       workingDaysPassed = daysUpToEnd.filter(d => !isSunday(d)).length;
     } catch (e) {
       workingDaysPassed = 0;
     }
     const standardProgressPercent = Math.min(100, (workingDaysPassed / workingDaysInMonth) * 100);
+
+    const pgRankings = Object.values(pgMap)
+      .map(pg => {
+        const achievement = (pg.sales / pg.kpi) * 100;
+        return { 
+          ...pg, 
+          achievement,
+          dailyAchievement: pg.dailyKpi > 0 ? (pg.dailySales / pg.dailyKpi) * 100 : 0,
+          gap: achievement - standardProgressPercent
+        };
+      })
+      .filter(pg => pg.sales > 0 || pg.kpi > 1);
 
     return {
       totalRevenue, totalTarget, totalPGs, conversionRate, switchOrdersCount, totalOrdersCount,
@@ -863,7 +872,12 @@ export default function AdminDashboard() {
 
           <div className="bg-white shadow rounded-lg overflow-hidden">
             <div className="px-6 py-5 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-              <h3 className="text-lg font-bold text-gray-900">Bảng Xếp Hạng PG (Theo % KPI)</h3>
+              <h3 className="text-lg font-bold text-gray-900">
+                Bảng Xếp Hạng PG (Theo % KPI) 
+                <span className="ml-2 text-sm font-medium text-gray-500">
+                  - Tiến độ chuẩn: {data.standardProgressPercent.toFixed(1)}%
+                </span>
+              </h3>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
@@ -893,6 +907,9 @@ export default function AdminDashboard() {
                     </th>
                     <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('achievement')}>
                       Tiến độ (%) {getSortIcon('achievement')}
+                    </th>
+                    <th className="px-6 py-3 text-center text-xs font-bold text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-50" onClick={() => requestSort('gap')}>
+                      GAP (%) {getSortIcon('gap')}
                     </th>
                   </tr>
                 </thead>
@@ -925,21 +942,26 @@ export default function AdminDashboard() {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-500">{formatCurrency(pg.kpi)}</td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center justify-center space-x-1">
-                          {pg.achievement >= (data as any).standardProgressPercent && (
+                          {pg.achievement >= data.standardProgressPercent && (
                             <CheckCircle2 className="w-4 h-4 text-green-600" />
                           )}
-                          <span className={`text-sm font-bold ${pg.achievement >= (data as any).standardProgressPercent ? 'text-green-600' : 'text-red-500'}`}>
+                          <span className={`text-sm font-bold ${pg.achievement >= data.standardProgressPercent ? 'text-green-600' : 'text-red-500'}`}>
                             {pg.achievement.toFixed(1)}%
                           </span>
                         </div>
                         <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1.5">
-                          <div className={`h-1.5 rounded-full ${pg.achievement >= (data as any).standardProgressPercent ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.achievement, 100)}%` }}></div>
+                          <div className={`h-1.5 rounded-full ${pg.achievement >= data.standardProgressPercent ? 'bg-green-500' : 'bg-red-500'}`} style={{ width: `${Math.min(pg.achievement, 100)}%` }}></div>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-center">
+                        <span className={`text-sm font-bold px-2 py-1 rounded-full ${pg.gap > 0 ? 'bg-green-100 text-green-700' : pg.gap < 0 ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {pg.gap > 0 ? '+' : ''}{pg.gap.toFixed(1)}%
+                        </span>
                       </td>
                     </tr>
                   ))}
                   {data.pgRankings.length === 0 && (
-                    <tr><td colSpan={8} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu hoạt động cho bộ lọc này.</td></tr>
+                    <tr><td colSpan={10} className="px-6 py-8 text-center text-gray-500">Chưa có dữ liệu hoạt động cho bộ lọc này.</td></tr>
                   )}
                 </tbody>
               </table>
