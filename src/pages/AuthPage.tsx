@@ -2,16 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
-import { Phone, Lock, LogIn, Store, Fingerprint } from 'lucide-react';
-import { isWebAuthnSupported, registerBiometric, authenticateBiometric } from '../lib/webauthn';
+import { Phone, Lock, LogIn, Store } from 'lucide-react';
 
 export default function AuthPage() {
   const [phone, setPhone] = useState('');
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
-  const [enableBiometric, setEnableBiometric] = useState(false);
-  const [hasBiometric, setHasBiometric] = useState(false);
-  const [bioSupported, setBioSupported] = useState(false);
   const navigate = useNavigate();
 
   // Kiểm tra đăng nhập bằng LocalStorage thay vì useAuth
@@ -20,51 +16,7 @@ export default function AuthPage() {
     if (storedUser) {
       navigate('/dashboard', { replace: true });
     }
-    
-    if (isWebAuthnSupported()) {
-      setBioSupported(true);
-    }
-    if (localStorage.getItem('biometric_cred_id')) {
-      setHasBiometric(true);
-    }
   }, [navigate]);
-
-  const handleBiometricLogin = async () => {
-    setLoading(true);
-    try {
-      const authPhone = await authenticateBiometric();
-      if (authPhone) {
-        setPhone(authPhone);
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*, roles(role_name)')
-          .eq('phone_number', authPhone)
-          .single();
-          
-        if (error || !data) {
-          toast.error("Không tìm thấy thông tin tài khoản!");
-          setLoading(false);
-          return;
-        }
-        if (data.status === false) {
-          toast.error("Tài khoản đã bị khóa.");
-          setLoading(false);
-          return;
-        }
-        
-        const userData = {
-          ...data,
-          role_name: Array.isArray(data.roles) ? data.roles[0]?.role_name : data.roles?.role_name
-        };
-        localStorage.setItem('shop_user', JSON.stringify(userData));
-        toast.success(`Đăng nhập thành công!`);
-        window.location.href = '/dashboard';
-      }
-    } catch (err: any) {
-      toast.error(err.message || 'Lỗi xác thực sinh trắc học.');
-      setLoading(false);
-    }
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,17 +80,6 @@ export default function AuthPage() {
         return;
       }
 
-      // Setup biometric if requested
-      if (enableBiometric) {
-        try {
-          await registerBiometric(phone.trim(), data.full_name);
-          toast.success("Đã thiết lập đăng nhập sinh trắc học thành công!");
-        } catch (bioError) {
-          console.error("Biometric setup failed:", bioError);
-          toast.error("Không thể thiết lập sinh trắc học. Bạn vẫn được đăng nhập bình thường.");
-        }
-      }
-
       // 4. Nếu mọi thứ đúng, lưu thông tin vào LocalStorage
       const userData = {
         ...data,
@@ -176,37 +117,6 @@ export default function AuthPage() {
 
         {/* Login Card */}
         <div className="bg-white py-8 px-6 shadow-2xl rounded-3xl sm:px-10 border border-gray-100">
-          {hasBiometric && (
-            <div className="mb-6">
-              <button
-                type="button"
-                onClick={handleBiometricLogin}
-                disabled={loading}
-                className="w-full flex justify-center items-center py-4 px-4 border border-transparent rounded-xl shadow-md text-base font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 disabled:opacity-70"
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Đang xử lý...
-                  </>
-                ) : (
-                  <>
-                    <Fingerprint className="w-6 h-6 mr-2" />
-                    Đăng nhập bằng Sinh trắc học
-                  </>
-                )}
-              </button>
-              <div className="mt-6 flex items-center justify-center">
-                <div className="h-px bg-gray-200 w-full"></div>
-                <span className="px-4 text-sm text-gray-500 whitespace-nowrap">Hoặc dùng mật khẩu</span>
-                <div className="h-px bg-gray-200 w-full"></div>
-              </div>
-            </div>
-          )}
-
           <form onSubmit={handleLogin} className="space-y-6">
             <div>
               <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
@@ -248,48 +158,27 @@ export default function AuthPage() {
                 />
               </div>
             </div>
-            
-            {bioSupported && !hasBiometric && (
-              <div className="flex items-center">
-                <input
-                  id="biometric"
-                  type="checkbox"
-                  className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded"
-                  checked={enableBiometric}
-                  onChange={(e) => setEnableBiometric(e.target.checked)}
-                />
-                <label htmlFor="biometric" className="ml-2 block text-sm text-gray-900">
-                  Sử dụng Face ID / Touch ID cho lần sau
-                </label>
-              </div>
-            )}
 
-            <div className="space-y-4">
-              <button
-                type="submit"
-                disabled={loading}
-                className={`w-full flex justify-center items-center py-3.5 px-4 border rounded-xl shadow-sm text-sm font-bold transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed ${
-                  hasBiometric 
-                    ? 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50 focus:ring-indigo-500' 
-                    : 'border-transparent text-white bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500 focus:ring-offset-2 focus:outline-none focus:ring-2'
-                }`}
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Đang đăng nhập...
-                  </>
-                ) : (
-                  <>
-                    <LogIn className="w-5 h-5 mr-2" />
-                    ĐĂNG NHẬP {hasBiometric && 'BẰNG MẬT KHẨU'}
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full flex justify-center items-center py-3.5 px-4 border border-transparent rounded-xl shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed mt-8"
+            >
+              {loading ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Đang đăng nhập...
+                </>
+              ) : (
+                <>
+                  <LogIn className="w-5 h-5 mr-2" />
+                  ĐĂNG NHẬP
+                </>
+              )}
+            </button>
           </form>
         </div>
         

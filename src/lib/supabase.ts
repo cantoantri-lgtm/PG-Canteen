@@ -14,9 +14,6 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true,
-    lock: dummyLock,
-    experimental: {
-      passkey: true
-    }
+    lock: dummyLock
   }
 });
