@@ -979,6 +979,7 @@ export default function AdminDashboard() {
           kpi={selectedPgForModal.kpi}
           orders={ordersData}
           masterData={masterData}
+          endDateStr={appliedFilters.endDate}
         />
       )}
 

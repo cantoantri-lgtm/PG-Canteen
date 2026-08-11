@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { uploadToCloudinary } from '../lib/cloudinary';
 import { useAuth } from '../lib/AuthContext';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -764,25 +765,14 @@ export default function PGDashboard() {
       // 2. Tạo Cart ID & Program ID
       const { data: finalCartId } = await supabase.rpc('generate_cart_id');
 
-      // 3. Upload tất cả ảnh lên Storage
-      const uploadPromises = billImages.map(async (file, index) => {
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${finalCartId}_${index}.${fileExt}`;
-        const filePath = `${programId}/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from('Bills')
-          .upload(filePath, file);
-        
-        if (uploadError) {
-          if (uploadError.message.includes('Bucket not found')) {
-            throw new Error('Lỗi: Chưa tạo bucket "Bills" trong Supabase Storage. Vui lòng tạo bucket tên "Bills" (chế độ Public) để tải ảnh hóa đơn.');
-          }
-          throw uploadError;
+      // 3. Upload tất cả ảnh lên Cloudinary
+      const uploadPromises = billImages.map(async (file) => {
+        try {
+          const secureUrl = await uploadToCloudinary(file);
+          return secureUrl;
+        } catch (uploadError: any) {
+          throw new Error('Lỗi tải ảnh lên Cloudinary: ' + uploadError.message);
         }
-
-        const { data: { publicUrl } } = supabase.storage.from('Bills').getPublicUrl(filePath);
-        return publicUrl;
       });
 
       const publicUrls = await Promise.all(uploadPromises);

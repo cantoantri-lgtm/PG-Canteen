@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import { X, Eye } from 'lucide-react';
+import { X, Eye, Sparkles, TrendingUp, TrendingDown, Clock, Activity } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { format } from 'date-fns';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import Modal from './Modal';
+import { usePGDetailAnalysis } from '../hooks/usePGDetailAnalysis';
 
 interface PGDetailModalProps {
   isOpen: boolean;
@@ -14,14 +15,18 @@ interface PGDetailModalProps {
   orders: any[];
   masterData: any;
   kpi: number;
+  endDateStr: string;
 }
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6'];
 
-export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterData, kpi }: PGDetailModalProps) {
+export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterData, kpi, endDateStr }: PGDetailModalProps) {
   const formatCurrency = (val: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
 
+  const [activeTab, setActiveTab] = useState<'overview' | 'analysis'>('overview');
   const [viewingBillImages, setViewingBillImages] = useState<string[] | null>(null);
+
+  const { analysis, isLoading: loadingAnalysis } = usePGDetailAnalysis(activeTab === 'analysis' ? pgId : null, masterData, endDateStr, kpi);
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
   const [loadingBill, setLoadingBill] = useState(false);
 
@@ -135,15 +140,36 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 sm:p-6">
       <div className="bg-white rounded-xl shadow-xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-          <h2 className="text-xl font-bold text-gray-900">Báo cáo chi tiết PG: <span className="text-indigo-600">{pgName}</span></h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors">
+        <div className="px-6 py-4 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between bg-gray-50">
+          <div className="flex items-center justify-between w-full sm:w-auto mb-4 sm:mb-0">
+            <h2 className="text-xl font-bold text-gray-900">Báo cáo chi tiết PG: <span className="text-indigo-600">{pgName}</span></h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors sm:hidden">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <div className="flex space-x-2 border-b sm:border-b-0 border-gray-200 w-full sm:w-auto">
+            <button
+              className={`pb-2 px-4 text-sm font-medium transition-colors ${activeTab === 'overview' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('overview')}
+            >
+              Tổng quan ngày
+            </button>
+            <button
+              className={`pb-2 px-4 text-sm font-medium transition-colors flex items-center ${activeTab === 'analysis' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-gray-500 hover:text-gray-700'}`}
+              onClick={() => setActiveTab('analysis')}
+            >
+              <Sparkles className="w-4 h-4 mr-1 text-purple-500" /> AI Phân tích 
+            </button>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors hidden sm:block">
             <X className="w-6 h-6" />
           </button>
         </div>
 
         <div className="p-6 overflow-y-auto flex-1 bg-gray-50">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+          {activeTab === 'overview' ? (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
             <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-100">
               <p className="text-sm font-medium text-gray-500 mb-1">Tổng doanh số</p>
               <p className="text-xl font-bold text-indigo-600">{formatCurrency(data.totalSales)}</p>
@@ -256,6 +282,109 @@ export function PGDetailModal({ isOpen, onClose, pgId, pgName, orders, masterDat
               </table>
             </div>
           </div>
+            </>
+          ) : (
+            <div className="space-y-6">
+              {loadingAnalysis ? (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <div className="w-10 h-10 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4"></div>
+                  <p className="text-gray-500 font-medium animate-pulse">AI đang phân tích dữ liệu...</p>
+                </div>
+              ) : !analysis ? (
+                <div className="text-center py-10 text-gray-500">Không có dữ liệu phân tích</div>
+              ) : (
+                <>
+                  <div className="flex items-center space-x-3 bg-gradient-to-r from-purple-100 to-indigo-50 p-4 rounded-xl border border-purple-100">
+                    <Sparkles className="w-6 h-6 text-purple-600" />
+                    <div>
+                      <h3 className="font-bold text-gray-900">Báo cáo phân tích so với kỳ trước</h3>
+                      <p className="text-sm text-gray-600">Tháng này so với cùng kỳ tháng trước</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm relative overflow-hidden">
+                      <div className="absolute right-0 top-0 opacity-10 translate-x-1/4 -translate-y-1/4">
+                        <Activity className="w-24 h-24" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-500 mb-1">Tổng quan doanh số</p>
+                      <p className="text-2xl font-bold text-gray-900 mb-2">{formatCurrency(analysis.currentRev)}</p>
+                      <div className={`flex items-center text-sm font-bold ${analysis.totalGrowth > 0 ? 'text-green-600' : analysis.totalGrowth < 0 ? 'text-red-500' : 'text-gray-500'}`}>
+                        {analysis.totalGrowth > 0 ? <TrendingUp className="w-4 h-4 mr-1" /> : analysis.totalGrowth < 0 ? <TrendingDown className="w-4 h-4 mr-1" /> : null}
+                        <span>{analysis.totalGrowth > 0 ? '+' : ''}{analysis.totalGrowth.toFixed(1)}% ({formatCurrency(analysis.totalDiff)})</span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-2">Kỳ trước: {formatCurrency(analysis.prevRev)}</p>
+                    </div>
+
+                    <div className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm relative overflow-hidden">
+                      <div className="absolute right-0 top-0 opacity-10 translate-x-1/4 -translate-y-1/4">
+                        <Clock className="w-24 h-24" />
+                      </div>
+                      <p className="text-sm font-medium text-gray-500 mb-1">Số ngày làm việc</p>
+                      <p className="text-2xl font-bold text-gray-900 mb-2">{analysis.attendance.currentPeriodDays} ngày</p>
+                      <div className={`flex items-center text-sm font-bold ${analysis.attendance.currentPeriodDays > analysis.attendance.prevPeriodDays ? 'text-green-600' : analysis.attendance.currentPeriodDays < analysis.attendance.prevPeriodDays ? 'text-red-500' : 'text-gray-500'}`}>
+                        {analysis.attendance.currentPeriodDays > analysis.attendance.prevPeriodDays ? <TrendingUp className="w-4 h-4 mr-1" /> : analysis.attendance.currentPeriodDays < analysis.attendance.prevPeriodDays ? <TrendingDown className="w-4 h-4 mr-1" /> : null}
+                        <span>{analysis.attendance.currentPeriodDays - analysis.attendance.prevPeriodDays > 0 ? '+' : ''}{analysis.attendance.currentPeriodDays - analysis.attendance.prevPeriodDays} ngày so với kỳ trước</span>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-2">Kỳ trước: {analysis.attendance.prevPeriodDays} ngày</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                      <div className="bg-green-50 px-5 py-3 border-b border-green-100 flex items-center space-x-2">
+                        <TrendingUp className="w-5 h-5 text-green-600" />
+                        <h3 className="font-bold text-green-800">Sản phẩm có xu hướng Tăng</h3>
+                      </div>
+                      <div className="divide-y divide-gray-100">
+                        {analysis.growingBrands.length > 0 ? (
+                          analysis.growingBrands.map((b: any) => (
+                            <div key={b.id} className="p-4 hover:bg-gray-50 transition-colors flex justify-between items-center">
+                              <div>
+                                <p className="font-bold text-gray-900">{b.name}</p>
+                                <p className="text-sm text-gray-500">{formatCurrency(b.currentRev)}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-green-600">+{b.pct.toFixed(1)}%</p>
+                                <p className="text-xs text-green-700">+{formatCurrency(b.diff)}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-6 text-center text-gray-500">Chưa có sản phẩm tăng trưởng</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                      <div className="bg-red-50 px-5 py-3 border-b border-red-100 flex items-center space-x-2">
+                        <TrendingDown className="w-5 h-5 text-red-600" />
+                        <h3 className="font-bold text-red-800">Sản phẩm có xu hướng Giảm</h3>
+                      </div>
+                      <div className="divide-y divide-gray-100">
+                        {analysis.decliningBrands.length > 0 ? (
+                          analysis.decliningBrands.map((b: any) => (
+                            <div key={b.id} className="p-4 hover:bg-gray-50 transition-colors flex justify-between items-center">
+                              <div>
+                                <p className="font-bold text-gray-900">{b.name}</p>
+                                <p className="text-sm text-gray-500">{formatCurrency(b.currentRev)}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-red-600">{b.pct.toFixed(1)}%</p>
+                                <p className="text-xs text-red-700">{formatCurrency(b.diff)}</p>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="p-6 text-center text-gray-500">Tuyệt vời, không có sản phẩm bị giảm</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
 
         {/* MODAL XEM ẢNH BILL */}
